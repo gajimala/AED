@@ -91,12 +91,23 @@
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
   }
-  #eduEntry{
-    position:fixed;right:62px;bottom:22px;z-index:500;
-    width:38px;height:38px;border-radius:50%;background:var(--danger);color:#fff;
-    border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
-    display:flex;align-items:center;justify-content:center;
+  #eduBar{
+    position:fixed;left:14px;right:14px;bottom:78px;z-index:500;
+    display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;
+    scrollbar-width:none; -ms-overflow-style:none;
   }
+  #eduBar::-webkit-scrollbar{display:none;}
+  .edu-cat-btn{
+    flex-shrink:0;
+    background:#fff;border:1px solid var(--line);border-radius:20px;
+    padding:10px 14px;box-shadow:0 3px 12px rgba(0,0,0,.18);cursor:pointer;
+    display:flex;flex-direction:row;align-items:center;gap:6px;
+  }
+  .edu-cat-btn svg{width:17px;height:17px;flex-shrink:0;}
+  .edu-cat-btn span{font-size:14px;font-weight:800;color:var(--ink);line-height:1;white-space:nowrap;}
+  .edu-cat-btn.cpr{border:1.5px solid var(--danger);}
+  .edu-cat-btn.gear{border:1.5px solid var(--teal);}
+  .edu-cat-btn.aed{border:1.5px solid var(--orange);}
   #classifyProgress{
     display:none;position:fixed;top:calc(58px + env(safe-area-inset-top));left:14px;z-index:499;
     background:rgba(11,52,84,.9);color:#fff;font-size:11.5px;padding:6px 12px;border-radius:20px;
@@ -280,9 +291,20 @@
 </button>
 
 <!-- 우측 하단 관리자 진입 아이콘 -->
-<button id="eduEntry" onclick="openEduPanel()" title="안전교육">
-  <svg viewBox="0 0 24 24" width="20" height="20"><path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z" fill="#fff"/></svg>
-</button>
+<div id="eduBar">
+  <button class="edu-cat-btn cpr" onclick="openEduPanel('cpr')" title="심폐소생술">
+    <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-10-9.2C.5 8.6 2.4 5 6 5c2 0 3.5 1.1 4.3 2.4L12 9.6l1.7-2.2C14.5 6.1 16 5 18 5c3.6 0 5.5 3.6 4 6.8-2.5 4.6-10 9.2-10 9.2z" fill="none" stroke="#E4572E" stroke-width="1.8"/><path d="M4 13h3l1.5-3 2 5 1.5-3H20" fill="none" stroke="#E4572E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>심폐소생술</span>
+  </button>
+  <button class="edu-cat-btn gear" onclick="openEduPanel('gear')" title="구조장비 사용법">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#0FA3B1" stroke-width="3.4"/><circle cx="12" cy="12" r="2.3" fill="#0FA3B1"/></svg>
+    <span>구조장비 사용법</span>
+  </button>
+  <button class="edu-cat-btn aed" onclick="openEduPanel('aed')" title="AED 사용법">
+    <svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="3" fill="none" stroke="#FF6B35" stroke-width="1.8"/><path d="M13 5 8 13h4l-1 6 6-9h-4z" fill="#FF6B35"/></svg>
+    <span>AED 사용법</span>
+  </button>
+</div>
 
 <div id="adminEntry" title="관리자 모드">
   <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
@@ -388,7 +410,7 @@
 
     <!-- 심폐소생술 -->
     <div class="edu-section active" id="edu-cpr">
-      <button id="metroBtn" onclick="toggleMetronome()">🔊 압박 속도 메트로놈 재생 (분당 100회)</button>
+      <button id="metroBtn" onclick="toggleMetronome()">🔊 압박 속도 메트로놈 재생 (분당 100회, 30:2 안내 포함)</button>
 
       <div class="step-card">
         <div class="step-num">1</div>
@@ -909,16 +931,11 @@ function onRegionChange(){
 
 /* =========================================================
    AED(자동심장충격기) 레이어 — 조회 전용, 수정/삭제 없음, 길찾기만 가능
-   ⚠️ 아래 SERVICE_KEY / 요청·응답 필드명은 data.go.kr 활용신청 페이지의
-   "요청변수/출력결과" 표를 보내주면 정확히 맞춰서 고칠 예정 (현재는 최선 추정치)
+   ⚠️ 실제 API 키는 브라우저(이 파일)에는 없습니다 — Cloudflare Worker 안에만 보관됩니다.
+   아래 AED_WORKER_URL에 배포한 Worker 주소를 넣어야 AED 조회가 동작합니다.
+   (aed-proxy-worker.js 파일 참고)
    ========================================================= */
-// ⚠️ 이 키는 data.go.kr에서 발급된 "인코딩된" 키입니다(%2F, %3D 등 포함).
-// 절대 URLSearchParams 등에 넣어 다시 인코딩하지 말고, 아래처럼 URL 문자열에 그대로 붙여야 합니다.
-const AED_SERVICE_KEY_ENCODED = 'TUbUhIiFWVRorR5hyktEuzY05oGV0Wd%2FTohPPdjOB27lUHRN521Oc6cJD%2BityxwoJzleTCzC%2BBYOroBVoyOxhA%3D%3D';
-const AED_API_URL = 'https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire';
-// CORS 때문에 브라우저에서 직접 호출이 막히면, 아래에 Cloudflare Worker 프록시 주소를 넣고 켜세요.
-// 예: const AED_PROXY_PREFIX = 'https://aed-proxy.내계정.workers.dev/?url=';
-const AED_PROXY_PREFIX = ''; // 비워두면 직접 호출, 값 넣으면 그 앞에 붙여서 프록시로 우회
+const AED_WORKER_URL = 'https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev';
 
 let aedState = { on:false, markers:[] };
 
@@ -961,11 +978,7 @@ async function loadAedForCurrentRegion(){
 async function fetchAed(sido, sigungu){
   clearAedMarkers();
   try{
-    // serviceKey는 이미 인코딩돼 있으므로 문자열로 직접 붙이고, 나머지 값만 encodeURIComponent 처리
-    const targetUrl = `${AED_API_URL}?serviceKey=${AED_SERVICE_KEY_ENCODED}`
-      + `&Q0=${encodeURIComponent(sido)}&Q1=${encodeURIComponent(sigungu)}`
-      + `&pageNo=1&numOfRows=100`;
-    const url = AED_PROXY_PREFIX ? (AED_PROXY_PREFIX + encodeURIComponent(targetUrl)) : targetUrl;
+    const url = `${AED_WORKER_URL}?sido=${encodeURIComponent(sido)}&sigungu=${encodeURIComponent(sigungu)}&pageNo=1&numOfRows=100`;
     const res = await fetch(url);
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const text = await res.text();
@@ -1488,7 +1501,10 @@ function readRational3(view, tiffStart, ifdOffset, tag, little){
 /* =========================================================
    안전교육 패널 (심폐소생술 / 구조장비 사용법 / AED 사용법)
    ========================================================= */
-function openEduPanel(){ document.getElementById('eduPanel').classList.add('show'); }
+function openEduPanel(tab){
+  document.getElementById('eduPanel').classList.add('show');
+  if(tab) switchEdu(tab);
+}
 function closeEduPanel(){
   document.getElementById('eduPanel').classList.remove('show');
   stopMetronome();
@@ -1507,30 +1523,80 @@ const METRO_BPM = 100;
 function toggleMetronome(){
   if(metroOn) stopMetronome(); else startMetronome();
 }
+
+let metroCompressionCount = 0;
+let metroPhase = 'compress'; // 'compress' | 'breath'
+
 function startMetronome(){
   if(!metroCtx) metroCtx = new (window.AudioContext || window.webkitAudioContext)();
   metroOn = true;
-  document.getElementById('metroBtn').textContent = '⏹ 정지 (재생 중 · 분당 100회)';
+  metroCompressionCount = 0;
+  metroPhase = 'compress';
   document.getElementById('metroBtn').classList.add('playing');
-  const intervalMs = 60000 / METRO_BPM;
-  const beep = ()=>{
-    const osc = metroCtx.createOscillator();
-    const gain = metroCtx.createGain();
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.35, metroCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, metroCtx.currentTime + 0.08);
-    osc.connect(gain).connect(metroCtx.destination);
-    osc.start();
-    osc.stop(metroCtx.currentTime + 0.09);
-  };
-  beep();
-  metroTimer = setInterval(beep, intervalMs);
+  runCompressionBeat();
 }
+
+function beepTone(freq, durationSec, gainLevel){
+  const osc = metroCtx.createOscillator();
+  const gain = metroCtx.createGain();
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(gainLevel, metroCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, metroCtx.currentTime + durationSec);
+  osc.connect(gain).connect(metroCtx.destination);
+  osc.start();
+  osc.stop(metroCtx.currentTime + durationSec + 0.01);
+}
+
+function runCompressionBeat(){
+  if(!metroOn) return;
+  const intervalMs = 60000 / METRO_BPM;
+  const btn = document.getElementById('metroBtn');
+  const tick = ()=>{
+    if(!metroOn) return;
+    beepTone(880, 0.08, 0.35);
+    metroCompressionCount++;
+    btn.textContent = `⏹ 압박 중 (${metroCompressionCount}/30) · 분당 100회`;
+    if(metroCompressionCount >= 30){
+      clearInterval(metroTimer);
+      runBreathCue();
+    }
+  };
+  tick();
+  metroTimer = setInterval(tick, intervalMs);
+}
+
+function runBreathCue(){
+  if(!metroOn) return;
+  const btn = document.getElementById('metroBtn');
+  btn.textContent = '🫁 인공호흡 2회 (압박 중지)';
+  // 음성 안내 지원 브라우저면 "인공호흡 두 번"을 말로 안내, 아니면 저음 톤 2번으로 대체
+  if(window.speechSynthesis){
+    try{
+      const utter = new SpeechSynthesisUtterance('인공호흡 두 번');
+      utter.lang = 'ko-KR';
+      utter.rate = 1.0;
+      speechSynthesis.speak(utter);
+    }catch(e){ /* 음성 실패해도 아래 톤으로 대체됨 */ }
+  }
+  // 저음 톤 2번(각 1초 간격)으로 "숨 불어넣기" 타이밍을 시각/청각으로 같이 안내
+  beepTone(440, 0.35, 0.3);
+  setTimeout(()=>{ if(metroOn) beepTone(440, 0.35, 0.3); }, 1300);
+
+  // 실제 인공호흡 2회에 걸리는 시간(약 4초) 뒤 다시 압박 30회로 복귀
+  setTimeout(()=>{
+    if(!metroOn) return;
+    metroCompressionCount = 0;
+    runCompressionBeat();
+  }, 4000);
+}
+
 function stopMetronome(){
   metroOn = false;
   if(metroTimer) clearInterval(metroTimer);
+  if(window.speechSynthesis) speechSynthesis.cancel();
+  metroCompressionCount = 0;
   const btn = document.getElementById('metroBtn');
-  if(btn){ btn.textContent = '🔊 압박 속도 메트로놈 재생 (분당 100회)'; btn.classList.remove('playing'); }
+  if(btn){ btn.textContent = '🔊 압박 속도 메트로놈 재생 (분당 100회, 30:2 안내 포함)'; btn.classList.remove('playing'); }
 }
 
 function openDirections(){
