@@ -1,0 +1,2131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>인명구조함 지도</title>
+
+<!--
+  ⚠️ 카카오맵 JS API 키가 이미 입력되어 있습니다 (앱키: d02572...51bb7).
+  카카오 디벨로퍼스(Web 플랫폼)에 이 파일을 서비스할 도메인(GitHub Pages 주소 등)을
+  등록해야 정상 동작합니다.
+-->
+<script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=d02572eca2dd38bbbbb6692254d51bb7&autoload=false&libraries=services,clusterer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+  :root{
+    --navy:#0B3454;
+    --navy-deep:#082A44;
+    --teal:#0FA3B1;
+    --teal-light:#5FCBD8;
+    --orange:#FF6B35;
+    --bg:#F4F7FA;
+    --card:#FFFFFF;
+    --ink:#12222E;
+    --ink-soft:#5B6B76;
+    --line:#E1E8ED;
+    --danger:#E4572E;
+    --radius:14px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Malgun Gothic", sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden;}
+
+  /* ---------- 스플래시 ---------- */
+  #splash{
+    position:fixed;inset:0;z-index:9999;
+    background:linear-gradient(160deg, var(--navy-deep), var(--navy) 60%, var(--teal));
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    color:#fff;transition:opacity .5s ease;
+  }
+  #splash .ring{
+    width:64px;height:64px;border-radius:50%;
+    border:3px solid rgba(255,255,255,.25);border-top-color:#fff;
+    animation:spin 1s linear infinite;margin-bottom:22px;
+  }
+  #splash h1{font-size:20px;font-weight:700;letter-spacing:.02em;margin:0 0 6px;}
+  #splash p{font-size:13px;color:rgba(255,255,255,.7);margin:0;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #splash.hide{opacity:0;pointer-events:none;}
+
+  /* ---------- 지도 로드 실패 안내 배너 ---------- */
+  #mapError{
+    display:none;position:fixed;top:14px;left:14px;right:14px;z-index:600;
+    background:#FDEDEA;color:var(--danger);padding:12px 14px;border-radius:10px;
+    font-size:12.5px;font-weight:600;line-height:1.5;box-shadow:0 4px 14px rgba(0,0,0,.15);
+    pointer-events:none; /* 정보성 배너일 뿐이라 클릭을 가로채지 않게(아래/주변 버튼 눌림 방해 방지) */
+  }
+  #mapError.show{display:block;}
+
+  /* ---------- 좌측 상단 행정구역 필터 ---------- */
+  #regionBar{
+    position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
+  }
+  #regionBar select{
+    background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:20px;
+    padding:9px 14px;font-size:13px;font-weight:700;color:var(--navy);
+    box-shadow:0 2px 10px rgba(0,0,0,.12);max-width:60vw;
+  }
+  #aedToggleBtn{
+    margin-left:8px;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:20px;
+    padding:9px 14px;font-size:13px;font-weight:700;color:var(--danger);
+    box-shadow:0 2px 10px rgba(0,0,0,.12);cursor:pointer;
+  }
+  #aedToggleBtn.on{background:var(--danger);color:#fff;border-color:var(--danger);}
+  #aedInfoBox{
+    display:none;position:fixed;left:14px;right:14px;bottom:90px;z-index:550;
+    background:#fff;border-radius:12px;padding:14px;box-shadow:0 4px 16px rgba(0,0,0,.18);
+    font-size:13px;line-height:1.6;
+  }
+  #aedInfoBox.show{display:block;}
+  #addReportEntry{
+    position:fixed;left:14px;bottom:22px;z-index:500;
+    background:var(--orange);color:#fff;border:none;border-radius:24px;
+    padding:11px 16px;font-size:13px;font-weight:700;box-shadow:0 3px 12px rgba(0,0,0,.22);
+    cursor:pointer;
+  }
+  #eduEntry{
+    position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
+    width:40px;height:40px;border-radius:50%;background:var(--navy);color:#fff;
+    border:2px solid #fff;font-size:18px;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
+  }
+  #classifyProgress{
+    display:none;position:fixed;top:calc(58px + env(safe-area-inset-top));left:14px;z-index:499;
+    background:rgba(11,52,84,.9);color:#fff;font-size:11.5px;padding:6px 12px;border-radius:20px;
+    pointer-events:none;
+  }
+  #classifyProgress.show{display:block;}
+
+  /* ---------- 지도 ---------- */
+  #map{position:fixed;inset:0;}
+
+  /* ---------- 우측 하단 관리자 아이콘 ---------- */
+  #adminEntry{
+    position:fixed;right:14px;bottom:22px;z-index:500;
+    width:38px;height:38px;border-radius:50%;
+    background:rgba(11,52,84,.55);border:1px solid rgba(255,255,255,.4);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    backdrop-filter:blur(2px);
+  }
+  #adminEntry svg{width:16px;height:16px;fill:#fff;opacity:.85;}
+  #adminEntry.active{background:var(--orange);border-color:var(--orange);}
+
+  /* ---------- 공용 모달/시트 ---------- */
+  .overlay{
+    position:fixed;inset:0;background:rgba(8,20,30,.45);z-index:800;
+    display:none;align-items:flex-end;justify-content:center;
+  }
+  .overlay.center{align-items:center;}
+  .overlay.show{display:flex;}
+  .sheet{
+    background:var(--card);width:100%;max-width:480px;
+    border-radius:var(--radius) var(--radius) 0 0;
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+    box-shadow:0 -8px 30px rgba(0,0,0,.2);
+    max-height:82vh;overflow-y:auto;
+    animation:up .25s ease;
+  }
+  .overlay.center .sheet{border-radius:var(--radius);max-width:340px;padding:24px;}
+  @keyframes up{from{transform:translateY(24px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+  .sheet-handle{width:36px;height:4px;background:var(--line);border-radius:2px;margin:0 auto 14px;}
+  .sheet h2{font-size:17px;margin:0 0 4px;}
+  .sheet .sub{font-size:12.5px;color:var(--ink-soft);margin:0 0 16px;}
+  .row{display:flex;gap:8px;margin-bottom:10px;}
+  .row > *{flex:1;}
+  label{font-size:12px;color:var(--ink-soft);display:block;margin-bottom:4px;font-weight:600;}
+  input[type=text],input[type=number],textarea{
+    width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+    font-size:14.5px;background:#FBFDFE;color:var(--ink);
+  }
+  textarea{resize:vertical;min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;}
+  input:focus,textarea:focus{outline:2px solid var(--teal);border-color:var(--teal);}
+  .btn{
+    border:none;border-radius:10px;padding:12px 16px;font-size:14.5px;font-weight:700;
+    cursor:pointer;width:100%;transition:transform .05s;
+  }
+  .btn:active{transform:scale(.98);}
+  .btn-primary{background:var(--teal);color:#fff;}
+  .btn-navy{background:var(--navy);color:#fff;}
+  .btn-orange{background:var(--orange);color:#fff;}
+  .btn-danger{background:#fff;color:var(--danger);border:1.5px solid var(--danger);}
+  .btn-ghost{background:#fff;color:var(--ink-soft);border:1.5px solid var(--line);}
+  .btn-sm{padding:8px 12px;font-size:13px;width:auto;}
+  .btn-row{display:flex;gap:8px;margin-top:14px;}
+  .btn-row > *{flex:1;}
+  .close-x{
+    position:absolute;top:16px;right:16px;width:28px;height:28px;border-radius:50%;
+    background:var(--bg);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;color:var(--ink-soft);font-size:15px;
+  }
+  .msg{font-size:12.5px;padding:8px 10px;border-radius:8px;margin-bottom:10px;display:none;}
+  .msg.err{display:block;background:#FDEDEA;color:var(--danger);}
+  .msg.ok{display:block;background:#E7F7EE;color:#1E8E5A;}
+
+  /* ---------- 관리자 코드 입력 ---------- */
+  #codeDots{display:flex;gap:10px;justify-content:center;margin:18px 0 4px;}
+  #codeDots span{width:12px;height:12px;border-radius:50%;background:var(--line);}
+  #codeDots span.filled{background:var(--navy);}
+  .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;}
+  .keypad button{
+    padding:14px 0;font-size:18px;border:1px solid var(--line);border-radius:10px;
+    background:#fff;cursor:pointer;font-weight:600;color:var(--ink);
+  }
+  .keypad button:active{background:var(--bg);}
+
+  /* ---------- 관리자 대시보드 ---------- */
+  #adminDash{
+    position:fixed;inset:0;background:var(--bg);z-index:700;display:none;flex-direction:column;
+  }
+  #adminDash.show{display:flex;}
+  .dash-top{
+    background:var(--navy);color:#fff;padding:16px 18px calc(14px + env(safe-area-inset-top));
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .dash-top .title{font-size:16px;font-weight:700;}
+  .dash-top .badge{font-size:11px;background:var(--orange);padding:3px 8px;border-radius:20px;margin-left:8px;vertical-align:middle;}
+  .dash-top button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:7px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;}
+  .tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);}
+  .tab{flex:1;text-align:center;padding:13px 4px;font-size:13px;font-weight:700;color:var(--ink-soft);cursor:pointer;border-bottom:2.5px solid transparent;}
+  .tab.active{color:var(--navy);border-color:var(--teal);}
+  .dash-body{flex:1;overflow-y:auto;padding:16px;}
+  .panel{display:none;}
+  .panel.active{display:block;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
+  .hint{font-size:12px;color:var(--ink-soft);line-height:1.6;background:#EFF6F8;border-radius:8px;padding:10px 12px;margin-bottom:12px;}
+  .hint b{color:var(--navy);}
+
+  table.bulk{width:100%;border-collapse:collapse;font-size:12.5px;}
+  table.bulk th{text-align:left;font-size:11px;color:var(--ink-soft);padding:6px 4px;border-bottom:1px solid var(--line);}
+  table.bulk td{padding:5px 4px;border-bottom:1px solid #F0F3F5;}
+  table.bulk input{padding:6px 7px;font-size:12.5px;}
+  table.bulk .del{color:var(--danger);cursor:pointer;font-size:16px;text-align:center;}
+  .count-pill{display:inline-block;background:var(--teal);color:#fff;font-size:11px;padding:2px 9px;border-radius:20px;margin-left:6px;}
+
+  /* ---------- 마커 정보 시트(사용자/관리자 공용) ---------- */
+  #markerSheet .addr{font-size:14px;font-weight:700;margin-bottom:2px;}
+  #markerSheet .coord{font-size:12px;color:var(--ink-soft);font-family:ui-monospace,monospace;margin-bottom:14px;}
+  .edit-fields{display:none;}
+  .edit-fields.show{display:block;}
+  /* 수정요청 오버레이는 배경을 투명+클릭통과로 만들어 지도(마커 드래그)가 살아있게 함 */
+  #reportOverlay{background:transparent;pointer-events:none;}
+  #reportOverlay .sheet{pointer-events:auto;}
+  #reportPhotoPreview img{width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-top:8px;}
+  .gps-badge{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;margin-top:8px;}
+  .gps-badge.ok{background:#E7F7EE;color:#1E8E5A;}
+  .gps-badge.warn{background:#FDEDEA;color:var(--danger);}
+  .req-card{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;background:#FBFDFE;}
+  .req-card img{width:100%;max-height:200px;object-fit:cover;border-radius:8px;margin-bottom:8px;}
+  .req-meta{font-size:12px;color:var(--ink-soft);line-height:1.6;margin-bottom:10px;}
+  .req-meta b{color:var(--ink);}
+
+  /* ---------- 안전교육 패널 ---------- */
+  #eduPanel{position:fixed;inset:0;background:var(--bg);z-index:900;display:none;flex-direction:column;}
+  #eduPanel.show{display:flex;}
+  .edu-top{background:var(--navy);color:#fff;padding:16px 18px calc(14px + env(safe-area-inset-top));display:flex;align-items:center;justify-content:space-between;}
+  .edu-top .title{font-size:16px;font-weight:700;}
+  .edu-top button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;}
+  .edu-tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);}
+  .edu-tab{flex:1;text-align:center;padding:13px 4px;font-size:12.5px;font-weight:700;color:var(--ink-soft);cursor:pointer;border-bottom:2.5px solid transparent;}
+  .edu-tab.active{color:var(--navy);border-color:var(--teal);}
+  .edu-body{flex:1;overflow-y:auto;padding:16px;}
+  .edu-section{display:none;}
+  .edu-section.active{display:block;}
+  .step-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;display:flex;gap:14px;align-items:flex-start;}
+  .step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  .step-icon{flex:0 0 64px;}
+  .step-icon svg{width:64px;height:64px;}
+  .step-text{flex:1;}
+  .step-text .step-title{font-weight:700;font-size:14px;margin-bottom:3px;}
+  .step-text .step-desc{font-size:12.5px;color:var(--ink-soft);line-height:1.55;}
+  .warn-box{background:#FDEDEA;color:var(--danger);border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:12px;line-height:1.5;}
+  .src-box{font-size:11px;color:var(--ink-soft);text-align:right;margin-top:6px;}
+  #metroBtn{width:100%;background:var(--teal);color:#fff;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;margin-bottom:14px;cursor:pointer;}
+  #metroBtn.playing{background:var(--danger);}
+
+</style>
+</head>
+<body>
+
+<!-- 스플래시: 1.2초 후 자동으로 지도로 전환 -->
+<div id="splash">
+  <div class="ring"></div>
+  <h1>인명구조함 지도</h1>
+  <p>카카오맵 불러오는 중…</p>
+</div>
+
+<!-- 지도 -->
+<div id="map"></div>
+<div id="mapError"></div>
+
+<!-- 좌측 상단 행정구역 필터 -->
+<div id="regionBar">
+  <select id="regionSelect" onchange="onRegionChange()">
+    <option value="all">전체</option>
+  </select>
+  <button id="aedToggleBtn" onclick="toggleAedLayer()">🚑 AED 표시</button>
+</div>
+<div id="classifyProgress"></div>
+<div id="aedInfoBox"></div>
+
+<button id="eduEntry" onclick="openEduPanel()" title="안전교육">📖</button>
+
+<!-- 우측 하단 관리자 진입 아이콘 -->
+<div id="adminEntry" title="관리자 모드">
+  <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+</div>
+
+<button id="addReportEntry" onclick="openReportFlow('add')">➕ 새 구조함 제보</button>
+
+<!-- 사용자용 마커 상세 시트 -->
+<div class="overlay" id="markerOverlay">
+  <div class="sheet" id="markerSheet">
+    <div class="sheet-handle"></div>
+    <div class="msg" id="markerMsg"></div>
+    <div class="addr" id="mAddr">-</div>
+    <div class="coord" id="mCoord" style="display:none;">-</div>
+
+    <div class="btn-row" id="userActions">
+      <button class="btn btn-primary" onclick="openDirections()">🚗 길찾기</button>
+    </div>
+    <div class="btn-row" id="reportBtnRow">
+      <button class="btn btn-orange" onclick="openReportFlow('edit')">📍 위치 수정요청</button>
+      <button class="btn btn-danger" onclick="openReportFlow('delete')">🗑 철거/삭제 신고</button>
+    </div>
+
+    <div class="edit-fields" id="editFields">
+      <div class="row">
+        <div><label>위도</label><input type="text" id="editLat"></div>
+        <div><label>경도</label><input type="text" id="editLng"></div>
+      </div>
+      <div class="row"><div><label>주소/설명</label><input type="text" id="editAddr"></div></div>
+    </div>
+
+    <div class="btn-row" id="markerActions">
+      <button class="btn btn-navy btn-sm" onclick="startEditCoord()">좌표 수정</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleMoveMode()" id="moveBtn">아이콘 이동</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteMarker()">삭제</button>
+    </div>
+    <div class="btn-row" id="editActions" style="display:none;">
+      <button class="btn btn-ghost btn-sm" onclick="cancelEditCoord()">취소</button>
+      <button class="btn btn-primary btn-sm" onclick="saveEditCoord()">저장</button>
+    </div>
+    <button class="btn btn-ghost" style="margin-top:10px;" onclick="closeMarkerSheet()">닫기</button>
+  </div>
+</div>
+
+<!-- 위치 수정요청 / 신규제보 / 삭제신고 (공용) -->
+<div class="overlay" id="reportOverlay">
+  <div class="sheet" id="reportSheet">
+    <div class="sheet-handle"></div>
+    <div class="msg" id="reportMsg"></div>
+
+    <h2 style="margin:0 0 4px;" id="reportTitle">위치 수정요청</h2>
+    <div class="sub" id="reportAddr" style="margin-bottom:14px;">-</div>
+
+    <div class="hint" id="reportHint"></div>
+
+    <div id="reportLocationStep">
+      <button class="btn btn-navy" onclick="startReportLocation()" id="reportLocBtn">📍 내 위치 불러오기</button>
+      <div class="coord" id="reportCoordDisplay" style="margin-top:10px;display:none;"></div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <label id="reportPhotoLabel">사진 첨부 (필수)</label>
+      <input type="file" id="reportPhoto" accept="image/*" capture="environment" onchange="onReportPhotoSelected(event)">
+      <div id="reportPhotoPreview"></div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <label id="reportReasonLabel">사유 (필수)</label>
+      <textarea id="reportReason" placeholder="예) 방파제 확장공사로 위치가 옮겨짐 / 기존에 없던 곳에 새로 설치됨 / 기기가 철거되고 없음" style="min-height:80px;" oninput="updateReportSubmitState()"></textarea>
+    </div>
+
+    <div class="btn-row" style="margin-top:16px;">
+      <button class="btn btn-ghost" onclick="closeReportFlow()">취소</button>
+      <button class="btn btn-orange" id="reportSubmitBtn" onclick="submitReport()" disabled>제출</button>
+    </div>
+  </div>
+</div>
+
+<!-- 관리자 코드 입력 -->
+<div class="overlay center" id="codeOverlay">
+  <div class="sheet" style="position:relative;">
+    <div class="close-x" onclick="closeCodeOverlay()">✕</div>
+    <h2>관리자 모드</h2>
+    <p class="sub">코드 5자리를 입력하세요</p>
+    <div id="codeDots"><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="msg err" id="codeErr" style="display:none;text-align:center;">코드가 올바르지 않습니다</div>
+    <div class="keypad" id="keypad"></div>
+  </div>
+</div>
+
+<!-- 안전교육 패널 -->
+<div id="eduPanel">
+  <div class="edu-top">
+    <span class="title">📖 안전교육</span>
+    <button onclick="closeEduPanel()">닫기</button>
+  </div>
+  <div class="edu-tabs">
+    <div class="edu-tab active" data-edu="cpr" onclick="switchEdu('cpr')">심폐소생술</div>
+    <div class="edu-tab" data-edu="gear" onclick="switchEdu('gear')">구조장비 사용법</div>
+    <div class="edu-tab" data-edu="aed" onclick="switchEdu('aed')">AED 사용법</div>
+  </div>
+  <div class="edu-body">
+
+    <!-- 심폐소생술 -->
+    <div class="edu-section active" id="edu-cpr">
+      <button id="metroBtn" onclick="toggleMetronome()">🔊 압박 속도 메트로놈 재생 (분당 110회)</button>
+
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="18" r="9" fill="none" stroke="#0B3454" stroke-width="3"/><path d="M32 27v20M20 34l12-7 12 7M18 55l14-8M46 55l-14-8" stroke="#0B3454" stroke-width="3" fill="none" stroke-linecap="round"/><text x="46" y="20" font-size="16">?</text></svg></div>
+        <div class="step-text"><div class="step-title">반응 확인</div><div class="step-desc">어깨를 가볍게 두드리며 "괜찮으세요?" 라고 크게 물어봅니다. 반응이 없으면 심장정지를 의심합니다.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="22" y="10" width="20" height="34" rx="4" fill="none" stroke="#FF6B35" stroke-width="3"/><circle cx="32" cy="38" r="2" fill="#FF6B35"/><text x="26" y="30" font-size="14" fill="#FF6B35">119</text></svg></div>
+        <div class="step-text"><div class="step-title">119 신고 + AED 요청 (호흡 확인보다 먼저)</div><div class="step-desc">일반인은 호흡 상태 판단이 어려우므로, 반응이 없으면 <b>호흡을 확인하기 전에 즉시 119에 신고</b>합니다. 스피커폰을 켜고 구급상황요원의 안내를 따르세요. 주변에 사람이 있으면 신고와 AED 요청을 나눠서 부탁합니다.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="20" y="16" width="24" height="30" rx="6" fill="none" stroke="#0FA3B1" stroke-width="3"/><path d="M20 28 Q26 22 32 28 T44 28" stroke="#0FA3B1" stroke-width="2.5" fill="none"/></svg></div>
+        <div class="step-text"><div class="step-title">호흡 확인 (구급상황요원과 함께)</div><div class="step-desc">숨을 쉬는지, 정상 호흡인지 확인합니다. 숨을 안 쉬거나, 헐떡이는 비정상 호흡(심장정지 호흡)이면 심장정지로 판단하고 즉시 가슴압박을 시작합니다.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="14" y="14" width="36" height="40" rx="6" fill="none" stroke="#0B3454" stroke-width="3"/><ellipse cx="32" cy="40" rx="8" ry="5" fill="#FF6B35"/><line x1="32" y1="14" x2="32" y2="54" stroke="#0B3454" stroke-width="1" stroke-dasharray="2,2"/></svg></div>
+        <div class="step-text"><div class="step-title">가슴압박 — 위치와 자세</div><div class="step-desc"><b>복장뼈(가슴뼈) 아래쪽 절반</b> 지점에 한 손 손꿈치를 대고, 다른 손을 그 위에 겹쳐 깍지를 낍니다. 팔꿈치를 곧게 펴고 체중을 실어 수직으로 압박합니다. 주로 쓰는 손이 아래로 가는 것이 좋습니다.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">5</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M32 10v44M22 20l10-10 10 10M22 44l10 10 10-10" stroke="#E4572E" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="step-text"><div class="step-title">압박 속도 · 깊이</div><div class="step-desc"><b>분당 100~120회</b> 속도로, <b>약 5cm 깊이</b>(6cm는 넘지 않게)로 압박합니다. 매번 압박 후에는 가슴이 완전히 원래대로 올라오도록 힘을 뺍니다(이완). 위 메트로놈 버튼으로 속도를 맞춰볼 수 있습니다. 2분마다 압박하는 사람을 교대하면 좋습니다.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">6</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="24" cy="24" r="10" fill="none" stroke="#0B3454" stroke-width="3"/><path d="M34 22c8 0 14 4 14 4" stroke="#0FA3B1" stroke-width="3" fill="none" stroke-linecap="round"/><text x="8" y="50" font-size="11" fill="#0B3454">30:2</text></svg></div>
+        <div class="step-text"><div class="step-title">인공호흡 (교육받았고 할 수 있으면)</div><div class="step-desc">가슴압박 30회 : 인공호흡 2회 비율로 반복합니다. 머리를 뒤로 젖히고 턱을 들어 기도를 연 뒤, 1초간 가슴이 올라올 정도로 불어넣습니다. <b>인공호흡을 못하거나 꺼려지면 압박만 계속</b>해도 괜찮습니다(가슴압박소생술) — 아무것도 안 하는 것보다 훨씬 낫습니다.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">7</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="22" fill="none" stroke="#1E8E5A" stroke-width="3"/><path d="M22 32l7 7 14-14" stroke="#1E8E5A" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="step-text"><div class="step-title">AED 도착 즉시 사용 + 반복</div><div class="step-desc">AED가 도착하면 즉시 사용합니다(사용법은 옆 탭). 구급대가 도착하거나, 환자가 움직이거나, 정상적으로 숨을 쉴 때까지 압박과 인공호흡을 반복합니다.</div></div>
+      </div>
+
+      <div class="warn-box">환자가 반응은 없지만 정상적으로 숨을 쉬고 있다면, 옆으로 눕혀 기도가 막히지 않게 하는 <b>회복 자세</b>를 취해주고 구급대를 기다립니다.</div>
+      <div class="src-box">출처: 2025년 한국 심폐소생술 가이드라인 (질병관리청·대한심폐소생협회)</div>
+    </div>
+
+    <!-- 구조장비 사용법 -->
+    <div class="edu-section" id="edu-gear">
+      <div class="warn-box">⚠️ 어떤 상황에서도 <b>구조자 본인이 직접 물에 뛰어드는 것은 최후의 수단</b>입니다. "도구를 이용해 닿기(Reach) → 던지기(Throw) → (배가 있으면) 저어가기(Row) → 직접 들어가기(Go)" 순서로 시도하세요.</div>
+
+      <div class="step-title" style="margin:14px 0 8px;">🛟 구명환</div>
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="20" fill="none" stroke="#FF6B35" stroke-width="6"/><circle cx="32" cy="32" r="20" fill="none" stroke="#fff" stroke-width="1"/></svg></div>
+        <div class="step-text"><div class="step-desc">발견 즉시 큰소리로 주변에 알리고 119에 신고합니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="18" cy="46" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><circle cx="46" cy="20" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M25 40 Q35 30 40 26" stroke="#E4572E" stroke-width="2.5" fill="none" stroke-dasharray="4,3"/></svg></div>
+        <div class="step-text"><div class="step-desc">구명환에 연결된 줄 끝을 발로 밟거나 손에 단단히 감아쥔 뒤, 대상자보다 바람이나 물살이 흘러오는 방향(상류) 쪽에서 던질 준비를 합니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="44" cy="24" r="9" fill="none" stroke="#FF6B35" stroke-width="3"/><circle cx="16" cy="46" r="6" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M22 42 Q32 30 38 26" stroke="#0B3454" stroke-width="2" fill="none" stroke-dasharray="3,3"/></svg></div>
+        <div class="step-text"><div class="step-desc">대상자의 몸 쪽 또는 살짝 넘어가도록 던져서, 대상자가 팔을 뻗어 구명환을 잡거나 몸에 걸칠 수 있게 합니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="10" fill="none" stroke="#FF6B35" stroke-width="3"/><path d="M32 42v14" stroke="#0B3454" stroke-width="2.5"/><path d="M20 62h24" stroke="#0B3454" stroke-width="2.5"/></svg></div>
+        <div class="step-text"><div class="step-desc">대상자가 구명환을 양팔로 안거나 팔을 끼우게 한 뒤, 천천히 끌어당겨 안전한 곳으로 이동시킵니다.</div></div>
+      </div>
+
+      <div class="step-title" style="margin:20px 0 8px;">🦺 구명조끼</div>
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M22 12h20l4 14-6 26H24l-6-26z" fill="none" stroke="#0B3454" stroke-width="3"/><line x1="27" y1="12" x2="27" y2="52" stroke="#0B3454" stroke-width="1.5"/><line x1="37" y1="12" x2="37" y2="52" stroke="#0B3454" stroke-width="1.5"/></svg></div>
+        <div class="step-text"><div class="step-desc">체격에 맞는 사이즈인지 확인합니다. 너무 크면 물에서 위로 벗겨질 수 있습니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M22 12h20l4 14-6 26H24l-6-26z" fill="none" stroke="#0B3454" stroke-width="3"/><rect x="24" y="30" width="16" height="4" fill="#FF6B35"/><rect x="24" y="40" width="16" height="4" fill="#FF6B35"/></svg></div>
+        <div class="step-text"><div class="step-desc">지퍼(또는 앞여밈)를 잠근 뒤, <b>가슴·허리 스트랩을 전부</b> 채우고 몸에 밀착되도록 바짝 조입니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="14" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M20 24l6-4M44 24l-6-4" stroke="#0B3454" stroke-width="2.5" stroke-linecap="round"/><path d="M32 21v10" stroke="#0B3454" stroke-width="2.5"/></svg></div>
+        <div class="step-text"><div class="step-desc">착용 후 양팔을 위로 들어 당겨봅니다. 조끼가 턱이나 귀까지 밀려 올라오면 스트랩을 더 조여야 합니다.</div></div>
+      </div>
+
+      <div class="step-title" style="margin:20px 0 8px;">🎯 드로우백 (구명로프)</div>
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="20" y="24" width="16" height="20" rx="3" fill="none" stroke="#0B3454" stroke-width="3"/><path d="M28 24c0-8 8-8 8 0" stroke="#0B3454" stroke-width="2.5" fill="none"/></svg></div>
+        <div class="step-text"><div class="step-desc">가방을 열어 로프가 코일 형태로 가지런히 들어있는지 확인합니다(엉켜있으면 던졌을 때 안 풀립니다).</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="20" cy="44" r="8" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M27 40 Q34 30 30 18" stroke="#FF6B35" stroke-width="2.5" fill="none" stroke-dasharray="4,3"/></svg></div>
+        <div class="step-text"><div class="step-desc">가방 반대쪽 로프 끝을 자기 손목이나 손에 확실히 고정합니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="10" y="34" width="12" height="16" rx="3" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M22 40 Q34 24 46 20" stroke="#E4572E" stroke-width="2.5" fill="none"/><circle cx="46" cy="20" r="4" fill="none" stroke="#E4572E" stroke-width="2"/></svg></div>
+        <div class="step-text"><div class="step-desc">대상자를 향해 언더핸드로 가방을 던집니다. 대상자 몸 쪽이나 살짝 넘어가게 던지는 게 좋습니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="44" cy="20" r="7" fill="none" stroke="#FF6B35" stroke-width="2.5"/><circle cx="16" cy="46" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M23 42 Q32 30 38 24" stroke="#0B3454" stroke-width="2" fill="none"/></svg></div>
+        <div class="step-text"><div class="step-desc">대상자가 로프를 양손으로 잡으면, 자신은 낮은 자세를 유지한 채 천천히 끌어당깁니다(끌려 들어가지 않도록 주의).</div></div>
+      </div>
+    </div>
+
+    <!-- AED 사용법 -->
+    <div class="edu-section" id="edu-aed">
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="14" y="10" width="36" height="44" rx="6" fill="none" stroke="#0B3454" stroke-width="3"/><circle cx="32" cy="20" r="5" fill="#1E8E5A"/></svg></div>
+        <div class="step-text"><div class="step-title">전원 켜기</div><div class="step-desc">심폐소생술을 방해하지 않는 위치에 AED를 놓고 전원 버튼을 누릅니다. 이후 음성 안내를 따라갑니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="18" y="8" width="28" height="40" rx="6" fill="none" stroke="#0B3454" stroke-width="3"/><rect x="21" y="14" width="9" height="7" fill="#FF6B35"/><rect x="34" y="30" width="9" height="7" fill="#FF6B35"/></svg></div>
+        <div class="step-text"><div class="step-title">패드 부착 (맨 가슴에)</div><div class="step-desc">상의를 벗기고 패드 포장지 그림대로 <b>오른쪽 빗장뼈 아래</b>와 <b>왼쪽 젖꼭지 아래 옆구리 쪽</b>에 단단히 붙입니다. <b>여성도 브래지어를 벗길 필요 없이</b> 위치만 조정해 가슴 조직을 피해 부착하면 됩니다(2025년 지침).</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="16" y="12" width="32" height="40" rx="6" fill="none" stroke="#0B3454" stroke-width="3"/><line x1="20" y1="20" x2="44" y2="44" stroke="#E4572E" stroke-width="3"/><line x1="44" y1="20" x2="20" y2="44" stroke="#E4572E" stroke-width="3"/></svg></div>
+        <div class="step-text"><div class="step-title">심전도 분석 중 — 접촉 금지</div><div class="step-desc">"분석 중입니다"라는 안내가 나오면 아무도 환자 몸에 닿지 않아야 합니다. 환자가 움직이지 않게 합니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M34 6L18 34h12l-4 24 20-30H32z" fill="#FF6B35"/></svg></div>
+        <div class="step-text"><div class="step-title">필요시 제세동 (충격) 버튼</div><div class="step-desc">"제세동이 필요합니다"라는 안내가 나오면, 모두 환자에게서 떨어졌는지 확인한 뒤 깜빡이는 버튼을 누릅니다. "필요하지 않습니다"라고 안내되면 그대로 다음 단계로 넘어갑니다.</div></div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">5</div>
+        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M32 10v44M22 20l10-10 10 10M22 44l10 10 10-10" stroke="#1E8E5A" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="step-text"><div class="step-title">즉시 가슴압박 재개</div><div class="step-desc">충격을 주었든 안 주었든, 곧바로 가슴압박을 다시 시작합니다. AED는 2분마다 자동으로 심전도를 다시 분석합니다. 구급대가 도착할 때까지 반복합니다.</div></div>
+      </div>
+      <div class="src-box">출처: 2025년 한국 심폐소생술 가이드라인 (질병관리청·대한심폐소생협회)</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 관리자 대시보드 -->
+<div id="adminDash">
+  <div class="dash-top">
+    <div><span class="title">관리자 모드</span><span class="badge">ADMIN</span></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeAdminDash()">지도로</button>
+      <button onclick="logoutAdmin()">종료</button>
+    </div>
+  </div>
+  <div class="tabs">
+    <div class="tab active" data-tab="new" onclick="switchTab('new')">신규입력</div>
+    <div class="tab" data-tab="bulkNew" onclick="switchTab('bulkNew')">대량입력</div>
+    <div class="tab" data-tab="bulkEdit" onclick="switchTab('bulkEdit')">대량수정</div>
+    <div class="tab" data-tab="requests" onclick="switchTab('requests')">수정요청<span id="reqBadge" class="count-pill" style="display:none;"></span></div>
+    <div class="tab" data-tab="history" onclick="switchTab('history')">변경이력</div>
+  </div>
+  <div class="dash-body">
+
+    <!-- 신규입력 -->
+    <div class="panel active" id="panel-new">
+      <div class="card">
+        <div class="hint">지도에서 <b>주황색 아이콘을 드래그</b>하거나 <b>지도를 클릭</b>하면 아래 위도/경도 칸에 자동으로 채워집니다. 물론 위도/경도를 직접 타이핑해도 되고, 그러면 지도 위 아이콘도 그 자리로 같이 옮겨갑니다.</div>
+        <div id="newMapPicker" style="width:100%;height:260px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px;"></div>
+        <div class="msg" id="newMsg"></div>
+        <div class="row">
+          <div><label>위도 (예: 37.7912)</label><input type="text" id="newLat" placeholder="37.xxxxxx" oninput="onNewLatLngTyped()"></div>
+          <div><label>경도 (예: 128.9229)</label><input type="text" id="newLng" placeholder="128.xxxxxx" oninput="onNewLatLngTyped()"></div>
+        </div>
+        <div class="row"><div><label>주소 / 위치 설명</label><input type="text" id="newAddr" placeholder="강릉시 강동면 안인진리 159-60"></div></div>
+        <div class="row"><div><label>비고 (선택)</label><input type="text" id="newNote" placeholder="방파제(TTP) 등"></div></div>
+        <button class="btn btn-primary" onclick="addSingle()">구조함 등록</button>
+      </div>
+    </div>
+
+    <!-- 대량입력 -->
+    <div class="panel" id="panel-bulkNew">
+      <div class="card">
+        <div class="hint"><b>엑셀 업로드</b>: 첫 행은 머리글로 취급됩니다. 열 이름은 <b>위도, 경도, 주소, 비고</b> (또는 lat, lng, addr, note) 중 하나로 인식합니다.</div>
+        <button class="btn btn-ghost btn-sm" style="margin-bottom:10px;" onclick="downloadBulkNewTemplate()">📄 엑셀 양식 다운로드</button>
+        <input type="file" id="bulkNewFile" accept=".xlsx,.xls,.csv" onchange="parseBulkNewExcel(event)">
+        <div class="msg" id="bulkNewFileMsg"></div>
+        <div id="bulkFilePreview"></div>
+      </div>
+      <div class="card">
+        <div class="hint"><b>직접 붙여넣기</b>: 한 줄에 하나씩, <b>위도,경도,주소</b> (쉼표 구분)<br>예) 37.791666,128.922927,강동면 안인진리 159-60</div>
+        <div class="msg" id="bulkNewMsg"></div>
+        <textarea id="bulkNewArea" placeholder="37.791666,128.922927,강동면 안인진리 159-60
+37.786407,128.929565,강동면 안인진리 3-40"></textarea>
+        <button class="btn btn-primary" style="margin-top:12px;" onclick="parseBulkNew()">미리보기 확인</button>
+        <div id="bulkPreview"></div>
+      </div>
+    </div>
+
+    <!-- 대량수정 -->
+    <div class="panel" id="panel-bulkEdit">
+      <div class="card">
+        <div class="hint"><b>엑셀 하나로 신규/수정/삭제 처리</b>: ① 먼저 <b>내보내기</b>로 현재 목록을 받으면 <b>구분</b> 열이 같이 나옵니다.<br>
+        · 기존 항목을 <b>고치려면</b>: id는 그대로 두고 값만 수정 (구분은 비워도 됨)<br>
+        · <b>새로 추가</b>하려면: 새 줄에 id는 비워두고 위도·경도·주소만 입력 (구분에 "신규"라고 써도 되고 안 써도 됨)<br>
+        · <b>삭제</b>하려면: 그 줄의 <b>구분 칸에 "삭제"</b>라고만 입력 (다른 값은 안 건드려도 됨)<br>
+        다 고친 뒤 다시 업로드하면 한 번에 반영됩니다. <b>id 열은 지우거나 다른 값으로 바꾸지 마세요.</b></div>
+        <div class="btn-row">
+          <button class="btn btn-navy btn-sm" onclick="exportToExcel()">📤 현재 목록 엑셀로 내보내기</button>
+        </div>
+        <input type="file" id="bulkEditFile" accept=".xlsx,.xls,.csv" style="margin-top:10px;" onchange="importBulkEditExcel(event)">
+        <div class="msg" id="bulkEditFileMsg"></div>
+      </div>
+      <div class="card">
+        <div class="hint">전체 <b id="totalCount">0</b>건 중 <b>검색으로 좁혀서</b> 편집하는 걸 권장합니다(한 번에 너무 많이 그리면 느려질 수 있음). 셀을 직접 눌러 값을 고친 뒤 아래 <b>보이는 항목 저장</b>을 눌러야 반영됩니다. 🗑 로 개별 삭제.</div>
+        <input type="text" id="bulkEditSearch" placeholder="주소로 검색 (예: 안인진리)" oninput="onBulkSearch()">
+        <select id="bulkEditRegionFilter" onchange="onBulkSearch()" style="margin-top:8px;width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;background:#FBFDFE;">
+          <option value="all">행정구역: 전체</option>
+        </select>
+        <div style="overflow-x:auto;margin-top:10px;">
+          <table class="bulk" id="bulkEditTable">
+            <thead><tr><th>주소</th><th>위도</th><th>경도</th><th>비고</th><th></th></tr></thead>
+            <tbody id="bulkEditBody"></tbody>
+          </table>
+        </div>
+        <div id="bulkEditMore" style="text-align:center;margin-top:10px;"></div>
+        <button class="btn btn-orange" style="margin-top:14px;" onclick="saveBulkEdit()">보이는 항목 저장 <span class="count-pill" id="visibleCount">0</span></button>
+      </div>
+    </div>
+
+    <!-- 수정요청 확인 -->
+    <div class="panel" id="panel-requests">
+      <div class="card">
+        <div class="hint">일반 사용자가 보낸 <b>수정/신규제보/삭제신고</b>입니다. 사진·사유·제안 위치를 확인하고 승인/반려하세요. <b>자동승인된 건은 여기 안 뜨고 이미 반영된 상태</b>이며 변경이력 탭에서 확인 가능합니다.</div>
+        <div id="requestsList"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-history">
+      <div class="card">
+        <div class="hint">민간인이 제출한 <b>모든</b> 수정/신규/삭제 건의 전체 기록입니다(자동승인·관리자승인·반려 포함). 사유와 사진이 함께 보관됩니다.</div>
+        <input type="text" id="historySearch" placeholder="주소 또는 사유로 검색" oninput="renderHistoryList()">
+        <div style="font-size:12px;color:var(--ink-soft);margin:8px 0;">전체 <b id="historyCount">0</b>건</div>
+        <div id="historyList"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   데이터 계층 (지금은 localStorage / 추후 Firestore로 교체)
+   레코드 구조: {id, lat, lng, addr, note, updatedAt}
+   ========================================================= */
+const STORAGE_KEY = 'gujohham_records_v1';
+const ADMIN_CODE = '22222';
+
+function loadRecords(){
+  // ensureLoaded() 완료 이후에만 최신값을 반환하는 동기 접근용 헬퍼
+  return _cache || [];
+}
+
+let _cache = null;
+const SEED_JSON_URL = './lifesavers.json'; // 원본 좌표는 별도 파일 — 이 파일과 같은 폴더에 둘 것
+
+async function ensureLoaded(){
+  if(_cache) return _cache;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if(raw){ _cache = JSON.parse(raw); return _cache; }
+  // localStorage가 비어있을 때(최초 실행) lifesavers.json에서 1회 불러와 시드로 사용
+  try{
+    const res = await fetch(SEED_JSON_URL);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const raw2 = await res.json(); // [{lat,lng}, ...] 원본 형식 그대로
+    const seed = raw2.map((r,i)=>({
+      id:'ls'+(i+1), lat:r.lat, lng:r.lng,
+      addr:r.addr||'', note:r.note||'', updatedAt:Date.now()
+    }));
+    _cache = seed;
+    saveRecords(seed);
+  }catch(e){
+    console.error('lifesavers.json 로드 실패 — 파일 경로/로컬서버 여부를 확인하세요', e);
+    _cache = [];
+  }
+  return _cache;
+}
+
+function saveRecords(list){ _cache = list; localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }
+function upsertRecord(rec){
+  const list = loadRecords();
+  const i = list.findIndex(r=>r.id===rec.id);
+  rec.updatedAt = Date.now();
+  if(i>-1) list[i] = {...list[i], ...rec}; else list.push(rec);
+  saveRecords(list);
+  return list;
+}
+function deleteRecord(id){
+  saveRecords(loadRecords().filter(r=>r.id!==id));
+}
+function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
+
+/* =========================================================
+   스플래시 → 지도 자동 전환
+   ========================================================= */
+window.addEventListener('load', ()=>{
+  // 지도(카카오 SDK)와 무관하게 좌표 데이터는 항상 먼저 불러온다.
+  // 이렇게 해야 카카오 로드가 실패해도 관리자 대량수정/엑셀 기능은 계속 쓸 수 있다.
+  ensureLoaded().then(()=>{
+    // 대시보드가 이미 열려 있었다면(드문 케이스) 표를 최신 데이터로 갱신
+    if(document.getElementById('adminDash').classList.contains('show')) buildBulkEditTable();
+  });
+
+  // 카카오 SDK 로드가 실패해도(앱키 미설정, 도메인 미등록, 네트워크 문제 등)
+  // 스플래시가 무한 로딩으로 멈추지 않도록 3초 뒤엔 무조건 정리한다.
+  const fallback = setTimeout(()=>{
+    document.getElementById('splash').classList.add('hide');
+    if(!window.kakao || !window.kakao.maps){
+      showMapError();
+    }
+  }, 3000);
+
+  if(window.kakao && window.kakao.maps){
+    try{
+      kakao.maps.load(()=>{ clearTimeout(fallback); initMap(); });
+    }catch(e){
+      console.error('kakao.maps.load 실패', e);
+      clearTimeout(fallback);
+      document.getElementById('splash').classList.add('hide');
+      showMapError();
+    }
+  }
+  // window.kakao 자체가 없으면(스크립트 태그 자체 실패) 위 fallback 타이머가 3초 뒤 처리함
+});
+
+function showMapError(){
+  const box = document.getElementById('mapError');
+  box.innerHTML =
+    '⚠️ 카카오맵을 불러오지 못했습니다.<br>' +
+    '① 카카오 디벨로퍼스에 등록한 앱키가 맞는지, ' +
+    '② 카카오 디벨로퍼스에 지금 이 페이지 도메인이 Web 플랫폼으로 등록돼 있는지 확인하세요.';
+  box.classList.add('show');
+}
+
+/* =========================================================
+   카카오맵 초기화 및 마커 렌더링
+   ========================================================= */
+let map, clusterer, markerObjs = {}; // id -> {marker, record}
+let moveModeId = null;
+let currentMarkerId = null;
+let editingCoord = false;
+let geocoder = null;
+let currentRegionFilter = 'all';
+let LIFESAVER_ICON = null; // kakao 로드 확인 후 initMap 안에서 생성 (최상단에서 만들면 SDK 로드 실패 시 스크립트 전체가 깨짐)
+
+async function initMap(){
+  // 구조함 표시 아이콘 — 예전 프로젝트(kcg-lifesaver-gg)에 있던 실제 구명환 아이콘 이미지 사용.
+  // icon/lifesaver-icon.png 파일이 이 index.html과 같은 폴더 구조(./icon/) 안에 있어야 함.
+  LIFESAVER_ICON = new kakao.maps.MarkerImage(
+    './icon/lifesaver-icon.png',
+    new kakao.maps.Size(36, 36),
+    { offset: new kakao.maps.Point(18, 18) }
+  );
+
+  const container = document.getElementById('map');
+  map = new kakao.maps.Map(container, {
+    center: new kakao.maps.LatLng(37.78, 128.95), // 강릉 동해안 기준
+    level: 9
+  });
+  // 축소하면 숫자 원으로 묶이고, 확대하면 개별 구조함 아이콘으로 풀리는 클러스터러
+  clusterer = new kakao.maps.MarkerClusterer({
+    map: map,
+    averageCenter: true,   // 클러스터 중심을 소속 마커들의 평균 위치로
+    minLevel: 7,            // 이 레벨보다 축소된 상태에서만 클러스터링 (그보다 확대하면 개별 표출)
+    gridSize: 70,
+    disableClickZoom: false, // 숫자 원 클릭 시 자동 확대
+    calculator: [10, 50, 100], // 10미만 / 10~49 / 50~99 / 100+ 4단계 스타일
+    styles: [
+      {width:'32px',height:'32px',background:'rgba(15,163,177,.88)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'32px',fontSize:'12px',fontWeight:'700',border:'2px solid #fff'},
+      {width:'40px',height:'40px',background:'rgba(255,107,53,.88)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'40px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff'},
+      {width:'48px',height:'48px',background:'rgba(228,87,46,.9)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'48px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff'},
+      {width:'58px',height:'58px',background:'rgba(11,52,84,.92)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'58px',fontSize:'14px',fontWeight:'700',border:'2px solid #fff'}
+    ]
+  });
+
+  await ensureLoaded();           // lifesavers.json(또는 저장된 값) 로딩 완료까지 대기
+  renderAllMarkers();
+  document.getElementById('splash').classList.add('hide');   // 로딩 끝난 뒤에 스플래시 제거
+
+  geocoder = new kakao.maps.services.Geocoder();
+  populateRegionSelect();
+  classifyMissingRegions();       // 아직 행정구역이 안 붙은 좌표만 백그라운드로 분류(최초 1회, 이후 캐시됨)
+
+  // 처음엔 내 GPS 위치를 중심으로 — 이후엔 지도를 강제로 다시 옮기지 않음(사용자가 팬/줌하면 그대로 둠)
+  centerMapOnMyLocationOnce();
+  startMyLocationTracking();
+
+  // AED를 켜둔 상태에서 지도를 움직이거나 확대/축소하면, 멈췄을 때(idle) 그 위치 기준으로 다시 조회
+  kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) loadAedForCurrentRegion(); });
+}
+
+function centerMapOnMyLocationOnce(){
+  if(!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{ map.setCenter(new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude)); },
+    (err)=>{ console.warn('초기 위치 가져오기 실패(기본 강릉 중심 유지):', err.message); },
+    { enableHighAccuracy:true, timeout:8000, maximumAge:60000 }
+  );
+}
+
+// 내 위치를 파란 점으로 표시하고 이동에 따라 계속 갱신 — 지도 중심은 절대 다시 옮기지 않음(사용자 조작 우선)
+let myLocationMarker = null, myLocationWatchId = null;
+function startMyLocationTracking(){
+  if(!navigator.geolocation) return;
+  const dotIcon = new kakao.maps.MarkerImage(
+    'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9" fill="#1E90FF" stroke="#fff" stroke-width="3"/></svg>`
+    ), new kakao.maps.Size(22,22), { offset: new kakao.maps.Point(11,11) }
+  );
+  myLocationWatchId = navigator.geolocation.watchPosition(
+    (pos)=>{
+      const p = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+      if(!myLocationMarker){
+        myLocationMarker = new kakao.maps.Marker({ position:p, map, image:dotIcon, zIndex:30 });
+      } else {
+        myLocationMarker.setPosition(p); // 위치만 갱신, 지도는 안 움직임(팬/줌 유지)
+      }
+    },
+    (err)=>{ console.warn('위치 추적 실패:', err.message); },
+    { enableHighAccuracy:true, maximumAge:5000, timeout:10000 }
+  );
+}
+
+function renderAllMarkers(){
+  clusterer.clear();
+  markerObjs = {};
+  const all = loadRecords();
+  const filtered = (currentRegionFilter==='all') ? all : all.filter(r=>r.region===currentRegionFilter);
+  const markers = filtered.map(rec=>buildMarker(rec));
+  clusterer.addMarkers(markers);   // 대량 추가는 addMarkers로 한번에 (성능)
+}
+
+/* =========================================================
+   행정구역 자동 분류 (카카오 좌표→행정구역 API, 최초 1회만 실행되고 캐시됨)
+   ========================================================= */
+function coord2RegionName(lat, lng){
+  return new Promise(resolve=>{
+    geocoder.coord2RegionCode(lng, lat, (result, status)=>{
+      if(status === kakao.maps.services.Status.OK && result.length){
+        const h = result.find(r=>r.region_type==='H') || result[0];
+        resolve(h ? `${h.region_1depth_name} ${h.region_2depth_name}` : '기타');
+      } else {
+        resolve('기타');
+      }
+    });
+  });
+}
+
+async function classifyMissingRegions(){
+  const todo = loadRecords().filter(r=>!r.region);
+  if(!todo.length) return;
+  const progress = document.getElementById('classifyProgress');
+  progress.classList.add('show');
+  const BATCH = 15;
+  let done = 0;
+  for(let i=0; i<todo.length; i+=BATCH){
+    const batch = todo.slice(i, i+BATCH);
+    await Promise.all(batch.map(async rec=>{
+      rec.region = await coord2RegionName(rec.lat, rec.lng);
+    }));
+    done += batch.length;
+    progress.textContent = `지역 분류 중… ${done}/${todo.length} (앱을 계속 써도 됩니다)`;
+    saveRecords(loadRecords());   // 중간에 앱을 꺼도 이어서 하도록 주기적으로 저장
+    populateRegionSelect();
+    populateBulkRegionFilter(loadRecords());   // 관리자가 대량수정 탭을 보고 있으면 건수 실시간 갱신
+  }
+  progress.classList.remove('show');
+  populateRegionSelect();
+  populateBulkRegionFilter(loadRecords());
+}
+
+function populateRegionSelect(){
+  const all = loadRecords();
+  const counts = {};
+  all.forEach(r=>{ if(r.region) counts[r.region] = (counts[r.region]||0) + 1; });
+  const sel = document.getElementById('regionSelect');
+  const prevValue = sel.value || currentRegionFilter;
+  const opts = [`<option value="all">전체 (${all.length}건)</option>`];
+  Object.keys(counts).sort().forEach(region=>{
+    opts.push(`<option value="${region}">${region} (${counts[region]}건)</option>`);
+  });
+  sel.innerHTML = opts.join('');
+  sel.value = counts[prevValue] ? prevValue : 'all';
+  currentRegionFilter = sel.value;
+}
+
+function onRegionChange(){
+  currentRegionFilter = document.getElementById('regionSelect').value;
+  renderAllMarkers();
+  if(aedState.on) loadAedForCurrentRegion();
+}
+
+/* =========================================================
+   AED(자동심장충격기) 레이어 — 조회 전용, 수정/삭제 없음, 길찾기만 가능
+   ⚠️ 아래 SERVICE_KEY / 요청·응답 필드명은 data.go.kr 활용신청 페이지의
+   "요청변수/출력결과" 표를 보내주면 정확히 맞춰서 고칠 예정 (현재는 최선 추정치)
+   ========================================================= */
+// ⚠️ 이 키는 data.go.kr에서 발급된 "인코딩된" 키입니다(%2F, %3D 등 포함).
+// 절대 URLSearchParams 등에 넣어 다시 인코딩하지 말고, 아래처럼 URL 문자열에 그대로 붙여야 합니다.
+const AED_SERVICE_KEY_ENCODED = 'TUbUhIiFWVRorR5hyktEuzY05oGV0Wd%2FTohPPdjOB27lUHRN521Oc6cJD%2BityxwoJzleTCzC%2BBYOroBVoyOxhA%3D%3D';
+const AED_API_URL = 'https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire';
+// CORS 때문에 브라우저에서 직접 호출이 막히면, 아래에 Cloudflare Worker 프록시 주소를 넣고 켜세요.
+// 예: const AED_PROXY_PREFIX = 'https://aed-proxy.내계정.workers.dev/?url=';
+const AED_PROXY_PREFIX = ''; // 비워두면 직접 호출, 값 넣으면 그 앞에 붙여서 프록시로 우회
+
+let aedState = { on:false, markers:[] };
+
+function toggleAedLayer(){
+  aedState.on = !aedState.on;
+  document.getElementById('aedToggleBtn').classList.toggle('on', aedState.on);
+  if(aedState.on){
+    loadAedForCurrentRegion();
+  } else {
+    clearAedMarkers();
+  }
+}
+
+function clearAedMarkers(){
+  aedState.markers.forEach(m=>m.setMap(null));
+  aedState.markers = [];
+  document.getElementById('aedInfoBox').classList.remove('show');
+}
+
+async function loadAedForCurrentRegion(){
+  const box = document.getElementById('aedInfoBox');
+  if(!map){
+    box.classList.add('show');
+    box.innerHTML = '⚠️ 지도가 아직 준비되지 않았습니다. 화면 위쪽에 지도 로딩 에러 배너가 떠 있는지 확인해주세요 (카카오 앱키/도메인 등록 문제일 수 있어요).';
+    return;
+  }
+  box.classList.add('show');
+  box.innerHTML = '📡 이 지역 AED 정보를 불러오는 중…';
+  // 지도 중심 좌표를 카카오 좌표→행정구역 API로 시도/시군구 이름을 얻어서 AED 조회에 사용
+  const center = map.getCenter();
+  const regionName = await coord2RegionName(center.getLat(), center.getLng());
+  if(!regionName || regionName==='기타'){
+    box.innerHTML = '⚠️ 현재 지도 위치의 행정구역을 확인하지 못했습니다. 지도를 조금 이동한 뒤 다시 시도해주세요.';
+    return;
+  }
+  const [sido, sigungu] = regionName.split(' ');
+  fetchAed(sido, sigungu);
+}
+
+async function fetchAed(sido, sigungu){
+  clearAedMarkers();
+  try{
+    // serviceKey는 이미 인코딩돼 있으므로 문자열로 직접 붙이고, 나머지 값만 encodeURIComponent 처리
+    const targetUrl = `${AED_API_URL}?serviceKey=${AED_SERVICE_KEY_ENCODED}`
+      + `&Q0=${encodeURIComponent(sido)}&Q1=${encodeURIComponent(sigungu)}`
+      + `&pageNo=1&numOfRows=100`;
+    const url = AED_PROXY_PREFIX ? (AED_PROXY_PREFIX + encodeURIComponent(targetUrl)) : targetUrl;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const items = parseAedXml(text);
+    if(!items.length){
+      document.getElementById('aedInfoBox').classList.add('show');
+      document.getElementById('aedInfoBox').innerHTML = `<b>${sido} ${sigungu}</b> 지역에서 AED 데이터를 찾지 못했습니다.`;
+      return;
+    }
+    items.forEach(item=>renderAedMarker(item));
+  }catch(e){
+    console.error('AED 조회 실패', e);
+    // CORS 차단이면 브라우저 콘솔에 "has been blocked by CORS policy" 메시지가 뜸 — 그 경우 프록시 필요
+    document.getElementById('aedInfoBox').classList.add('show');
+    document.getElementById('aedInfoBox').innerHTML =
+      `AED 정보를 불러오지 못했습니다. (원인: 앱키 미설정, 또는 이 API가 브라우저 직접호출을 막는 CORS 정책일 수 있음)`;
+  }
+}
+
+// TODO: 응답 필드명(buildPlace, buildAddress, wgs84Lat/Lon, tel 등)도 실제 응답 확인 후 확정
+function parseAedXml(xmlText){
+  const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+  const nodes = Array.from(doc.querySelectorAll('item'));
+  return nodes.map(n=>{
+    const g = tag => n.querySelector(tag)?.textContent || '';
+    return {
+      name: g('org') || '이름 미상',           // 설치기관명 (예: 동북아무역센터)
+      place: g('buildPlace') || '',            // 세부 설치위치 (예: 60층 피난안전구역)
+      address: g('buildAddress') || '',
+      lat: parseFloat(g('wgs84Lat')),
+      lng: parseFloat(g('wgs84Lon')),
+      tel: g('managerTel') || g('clerkTel') || '',
+      manager: g('manager') || '',
+      model: g('model') || '', mfg: g('mfg') || '',
+      // 요일별 운영시간(HHMM). 0000~2400이면 그 요일은 24시간 운영.
+      monStart:g('monSttTme'), monEnd:g('monEndTme'),
+      tueStart:g('tueSttTme'), tueEnd:g('tueEndTme'),
+      wedStart:g('wedSttTme'), wedEnd:g('wedEndTme'),
+      thuStart:g('thuSttTme'), thuEnd:g('thuEndTme'),
+      friStart:g('friSttTme'), friEnd:g('friEndTme'),
+      satStart:g('satSttTme'), satEnd:g('satEndTme'),
+      sunStart:g('sunSttTme'), sunEnd:g('sunEndTme'),
+      holStart:g('holSttTme'), holEnd:g('holEndTme')
+    };
+  }).filter(a=>!isNaN(a.lat) && !isNaN(a.lng));
+}
+
+// 운영시간 정보를 바탕으로 "지금 이용 가능한지" 계산 (필드명 확정되면 그대로 동작)
+function isAedAvailableNow(a){
+  const now = new Date();
+  const day = now.getDay(); // 0=일 1=월 ... 6=토
+  const byDay = [
+    [a.sunStart, a.sunEnd], [a.monStart, a.monEnd], [a.tueStart, a.tueEnd],
+    [a.wedStart, a.wedEnd], [a.thuStart, a.thuEnd], [a.friStart, a.friEnd], [a.satStart, a.satEnd]
+  ];
+  const [startStr, endStr] = byDay[day];
+  // ⚠️ 공휴일이면 holStart/holEnd를 써야 더 정확하지만, 공휴일 여부 판별에는
+  // 별도 달력 데이터가 필요해서 이번 버전에서는 요일 기준으로만 판단합니다.
+  if(!startStr || !endStr) return { available:null, label:'운영시간 정보 없음' };
+  const pad = s => s.padStart(4,'0');
+  const nowMin = now.getHours()*60 + now.getMinutes();
+  const toMin = s => parseInt(pad(s).slice(0,2))*60 + parseInt(pad(s).slice(2,4));
+  const inRange = nowMin >= toMin(startStr) && nowMin <= toMin(endStr);
+  const is24 = startStr==='0000' && (endStr==='2400' || endStr==='0000');
+  return {
+    available: inRange,
+    label: is24 ? '24시간 이용 가능' :
+      inRange ? `현재 이용 가능 (~${endStr.slice(0,2)}:${endStr.slice(2,4)})` : `지금은 운영시간 아님 (${startStr.slice(0,2)}:${startStr.slice(2,4)}~${endStr.slice(0,2)}:${endStr.slice(2,4)})`
+  };
+}
+
+const AED_ICON = () => new kakao.maps.MarkerImage(
+  'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><rect x="3" y="3" width="24" height="24" rx="6" fill="#E4572E" stroke="#fff" stroke-width="2"/><path d="M15 8v14M8 15h14" stroke="#fff" stroke-width="3"/></svg>`
+  ), new kakao.maps.Size(30,30), { offset: new kakao.maps.Point(15,15) }
+);
+// 지금 운영시간이 아닌 AED는 흑백(회색)으로 표시 — 가서 못 쓰는 걸 미리 알 수 있게
+const AED_ICON_GRAY = () => new kakao.maps.MarkerImage(
+  'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><rect x="3" y="3" width="24" height="24" rx="6" fill="#9AA5AC" stroke="#fff" stroke-width="2"/><path d="M15 8v14M8 15h14" stroke="#fff" stroke-width="3"/></svg>`
+  ), new kakao.maps.Size(30,30), { offset: new kakao.maps.Point(15,15) }
+);
+
+function renderAedMarker(a){
+  const pos = avoidOverlapPosition(a.lat, a.lng);
+  // 운영시간 정보가 있고, 지금이 그 시간대가 아니면(available===false) 흑백 아이콘.
+  // 운영시간 정보가 아예 없으면(available===null) 굳이 막지 말고 활성(컬러) 상태로 표시.
+  const status = isAedAvailableNow(a);
+  const icon = (status.available === false) ? AED_ICON_GRAY() : AED_ICON();
+  const marker = new kakao.maps.Marker({
+    position: new kakao.maps.LatLng(pos.lat, pos.lng), map, image: icon, zIndex: 15
+  });
+  kakao.maps.event.addListener(marker, 'click', ()=>showAedInfo(a));
+  aedState.markers.push(marker);
+}
+
+// 구조함(또는 다른 AED)과 5m 이내로 겹치면 살짝 옆으로 밀어서 둘 다 보이고 둘 다 클릭되게 함
+// (원래 좌표는 a.lat/a.lng에 그대로 남아있으므로 길찾기는 정확한 실제 위치로 안내됨)
+function avoidOverlapPosition(lat, lng){
+  const OVERLAP_THRESHOLD_M = 5;
+  const OFFSET_M = 8;
+  const existing = loadRecords();
+  let tooClose = existing.some(r => haversineMeters(lat, lng, r.lat, r.lng) < OVERLAP_THRESHOLD_M)
+              || aedState.markers.some(m => {
+                   const p = m.getPosition();
+                   return haversineMeters(lat, lng, p.getLat(), p.getLng()) < OVERLAP_THRESHOLD_M;
+                 });
+  if(!tooClose) return { lat, lng };
+  const dLat = (OFFSET_M/111000);
+  const dLng = (OFFSET_M/(111000*Math.cos(lat*Math.PI/180)));
+  return { lat: lat + dLat, lng: lng + dLng };
+}
+
+function showAedInfo(a){
+  const status = isAedAvailableNow(a);
+  const badgeColor = status.available===true ? '#1E8E5A' : status.available===false ? 'var(--danger)' : 'var(--ink-soft)';
+  const box = document.getElementById('aedInfoBox');
+  box.innerHTML = `
+    <div style="font-weight:700;margin-bottom:4px;">🚑 ${a.name}</div>
+    <div style="color:var(--ink-soft);margin-bottom:6px;">${a.address}${a.place ? ' · '+a.place : ''}</div>
+    <div style="color:${badgeColor};font-weight:700;margin-bottom:10px;">${status.label}</div>
+    <button class="btn btn-primary btn-sm" onclick="openAedDirections(${a.lat},${a.lng},'${(a.name||'AED').replace(/'/g,"")}')">🚗 이 AED로 길찾기</button>
+  `;
+  box.classList.add('show');
+}
+
+function openAedDirections(lat, lng, name){
+  const url = `https://map.kakao.com/link/to/${encodeURIComponent(name)},${lat},${lng}`;
+  if(window.cordova && window.cordova.InAppBrowser) cordova.InAppBrowser.open(url, '_system', 'location=yes');
+  else if(window.cordova) location.href = url;
+  else window.open(url, '_blank');
+}
+
+function buildMarker(rec){
+  const pos = new kakao.maps.LatLng(rec.lat, rec.lng);
+  const marker = new kakao.maps.Marker({ position: pos, image: LIFESAVER_ICON }); // map은 지정 안 함 — 클러스터러가 관리
+  kakao.maps.event.addListener(marker, 'click', ()=>openMarkerSheet(rec.id));
+  kakao.maps.event.addListener(marker, 'dragend', ()=>{
+    const p = marker.getPosition();
+    upsertRecord({...markerObjs[rec.id].record, lat:p.getLat(), lng:p.getLng(), region: undefined});
+    markerObjs[rec.id].record.lat = p.getLat();
+    markerObjs[rec.id].record.lng = p.getLng();
+    markerObjs[rec.id].record.region = undefined;
+    clusterer.redraw();
+    classifyMissingRegions();
+    refreshMarkerSheetIfOpen(rec.id, '아이콘 위치가 저장되었습니다.');
+  });
+  markerObjs[rec.id] = { marker, record: rec };
+  return marker;
+}
+
+function addMarkerToMap(rec){
+  const marker = buildMarker(rec);
+  clusterer.addMarker(marker);   // 개별 추가(신규입력 등)는 addMarker
+}
+
+/* =========================================================
+   사용자 마커 상세 시트: 수정 / 이동 / 삭제
+   ========================================================= */
+function openMarkerSheet(id){
+  currentMarkerId = id;
+  editingCoord = false;
+  const rec = markerObjs[id].record;
+  document.getElementById('mAddr').textContent = rec.addr || '(주소 미입력)';
+  document.getElementById('mCoord').textContent = `${rec.lat.toFixed(6)}, ${rec.lng.toFixed(6)}`;
+  document.getElementById('mCoord').style.display = isAdmin ? 'block' : 'none'; // 일반 사용자에겐 좌표 숫자 비노출
+  document.getElementById('userActions').style.display = isAdmin ? 'none' : 'flex'; // 일반 사용자는 길찾기 버튼
+  document.getElementById('reportBtnRow').style.display = isAdmin ? 'none' : 'flex'; // 일반 사용자는 수정요청 버튼
+  document.getElementById('editFields').classList.remove('show');
+  document.getElementById('editActions').style.display = 'none';
+  document.getElementById('markerMsg').style.display='none';
+  document.getElementById('moveBtn').textContent = (moveModeId===id) ? '이동 완료' : '아이콘 이동';
+  // 좌표 수정 / 아이콘 이동 / 삭제는 관리자 모드에서만 노출. 일반 사용자에게는 위치 정보만 보여줌.
+  document.getElementById('markerActions').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('markerOverlay').classList.add('show');
+}
+/* =========================================================
+   민간인 제보(수정/신규/삭제) — 내 위치 → 아이콘 드래그로 위치 제안
+   → 사진(필수) + 사유(필수) → 사진 EXIF GPS와 제안 위치 거리 비교 → 자동승인/보류
+   ⚠️ 자동승인이든 대기든 관계없이 모든 제출 건은 REQUESTS_KEY에 이력으로 영구 보관됨
+   ========================================================= */
+const AUTO_APPROVE_RADIUS_M = 50; // 이 반경(m) 이내면 자동 승인. 필요시 숫자만 조절하면 됨.
+const REQUESTS_KEY = 'gujohham_requests_v1';
+
+// type: 'edit'(위치수정) | 'add'(신규제보) | 'delete'(철거/삭제신고)
+let reportState = { type:'edit', targetId:null, marker:null, photoDataUrl:null, photoGPS:null };
+
+function haversineMeters(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const p1 = lat1*Math.PI/180, p2 = lat2*Math.PI/180;
+  const dphi = (lat2-lat1)*Math.PI/180, dlmb = (lon2-lon1)*Math.PI/180;
+  const a = Math.sin(dphi/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dlmb/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+
+function loadRequests(){
+  try{ return JSON.parse(localStorage.getItem(REQUESTS_KEY)) || []; }catch(e){ return []; }
+}
+function saveRequests(list){ localStorage.setItem(REQUESTS_KEY, JSON.stringify(list)); }
+
+const REPORT_COPY = {
+  edit: {
+    title: '위치 수정요청',
+    hint: `<b>사용 방법</b><br>
+      ① <b>내 위치 불러오기</b>를 누르면 지도에 주황색 아이콘이 내 GPS 위치에 표시돼요.<br>
+      ② 그 아이콘을 <b>드래그</b>해서 구조함이 실제로 있는 정확한 위치로 옮겨주세요.<br>
+      ③ <b>사진</b>과 <b>사유</b>를 반드시 입력해주세요.<br>
+      ④ 사진의 GPS 위치와 ②의 위치가 <b>${AUTO_APPROVE_RADIUS_M}m</b> 이내면 자동 승인, 아니면 관리자 확인 후 반영됩니다.`,
+    photoLabel: '구조함 사진 첨부 (필수)',
+    reasonLabel: '사유 (필수) — 예: 위치가 잘못 표시돼 있음',
+    needLocation: true,
+    submitLabel: '수정요청 제출'
+  },
+  add: {
+    title: '새 구조함 제보',
+    hint: `<b>사용 방법</b><br>
+      ① <b>내 위치 불러오기</b>로 지도에 아이콘을 띄운 뒤, 실제 구조함이 있는 위치로 <b>드래그</b>해주세요.<br>
+      ② <b>사진</b>과 <b>사유</b>(예: 신규 설치 확인)를 입력해주세요.<br>
+      ③ 사진 GPS와 위치가 <b>${AUTO_APPROVE_RADIUS_M}m</b> 이내면 자동 등록, 아니면 관리자 확인 후 등록됩니다.`,
+    photoLabel: '구조함 사진 첨부 (필수)',
+    reasonLabel: '사유 (필수) — 예: 새로 설치된 구조함을 발견함',
+    needLocation: true,
+    submitLabel: '신규제보 제출'
+  },
+  delete: {
+    title: '철거/삭제 신고',
+    hint: `<b>사용 방법</b><br>
+      ① 이 구조함이 있어야 할 자리에서 <b>내 위치 불러오기</b>를 눌러주세요(그 자리에 있다는 걸 확인하기 위함).<br>
+      ② 없어진 자리(또는 파손 상태)가 보이는 <b>사진</b>과 <b>사유</b>를 입력해주세요.<br>
+      ③ 내 위치가 기존 등록 좌표와 <b>${AUTO_APPROVE_RADIUS_M}m</b> 이내면 자동 삭제, 아니면 관리자 확인 후 삭제됩니다.`,
+    photoLabel: '없어진 자리/파손 사진 첨부 (필수)',
+    reasonLabel: '사유 (필수) — 예: 태풍으로 유실됨, 철거됨 등',
+    needLocation: true,
+    submitLabel: '삭제신고 제출'
+  }
+};
+
+function openReportFlow(type){
+  reportState = { type, targetId: (type==='add' ? null : currentMarkerId), marker:null, photoDataUrl:null, photoGPS:null };
+  const copy = REPORT_COPY[type];
+  document.getElementById('reportTitle').textContent = copy.title;
+  document.getElementById('reportHint').innerHTML = copy.hint;
+  document.getElementById('reportPhotoLabel').textContent = copy.photoLabel;
+  document.getElementById('reportReasonLabel').textContent = copy.reasonLabel;
+  document.getElementById('reportSubmitBtn').textContent = copy.submitLabel;
+
+  if(type==='add'){
+    document.getElementById('reportAddr').textContent = '새로 발견한 구조함 위치를 제보합니다.';
+  } else {
+    const rec = markerObjs[currentMarkerId].record;
+    document.getElementById('reportAddr').textContent = rec.addr || '(주소 미입력) 구조함';
+  }
+
+  document.getElementById('reportCoordDisplay').style.display = 'none';
+  document.getElementById('reportPhoto').value = '';
+  document.getElementById('reportPhotoPreview').innerHTML = '';
+  document.getElementById('reportReason').value = '';
+  document.getElementById('reportMsg').style.display = 'none';
+  document.getElementById('reportSubmitBtn').disabled = true;
+
+  closeMarkerSheet();
+  document.getElementById('reportOverlay').classList.add('show');
+
+  // 삭제신고인 경우, 기존 등록 좌표를 참고 표시용으로 미리 보여줌(이동은 그대로 자유)
+  if(type==='delete' && markerObjs[currentMarkerId]){
+    const rec = markerObjs[currentMarkerId].record;
+    placeReportMarker(rec.lat, rec.lng);
+  }
+}
+
+function closeReportFlow(){
+  if(reportState.marker) reportState.marker.setMap(null);
+  reportState = { type:'edit', targetId:null, marker:null, photoDataUrl:null, photoGPS:null };
+  document.getElementById('reportOverlay').classList.remove('show');
+}
+
+function startReportLocation(){
+  const msg = document.getElementById('reportMsg');
+  if(!navigator.geolocation){
+    msg.textContent = '이 브라우저/기기에서 위치 가져오기를 지원하지 않습니다.'; msg.className='msg err'; msg.style.display='block';
+    return;
+  }
+  msg.textContent = '내 위치를 확인하는 중…'; msg.className='msg ok'; msg.style.display='block';
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      placeReportMarker(pos.coords.latitude, pos.coords.longitude);
+      msg.textContent = '지도에서 주황색 아이콘을 정확한 위치로 드래그해주세요.'; msg.className='msg ok'; msg.style.display='block';
+    },
+    (err)=>{
+      msg.textContent = '위치를 가져오지 못했습니다 (위치 권한을 허용했는지 확인해주세요). 오류: ' + err.message;
+      msg.className='msg err'; msg.style.display='block';
+    },
+    { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
+  );
+}
+
+function placeReportMarker(lat, lng){
+  if(reportState.marker) reportState.marker.setMap(null);
+  const pos = new kakao.maps.LatLng(lat, lng);
+  const img = new kakao.maps.MarkerImage(
+    'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><circle cx="15" cy="15" r="12" fill="#FF6B35" stroke="#fff" stroke-width="3"/></svg>`
+    ),
+    new kakao.maps.Size(30,30), { offset: new kakao.maps.Point(15,15) }
+  );
+  const marker = new kakao.maps.Marker({ position: pos, map, image: img, draggable: true, zIndex: 20 });
+  kakao.maps.event.addListener(marker, 'dragend', ()=> updateReportCoordDisplay());
+  reportState.marker = marker;
+  map.setCenter(pos);
+  map.setLevel(4);
+  updateReportCoordDisplay();
+}
+
+function updateReportCoordDisplay(){
+  const p = reportState.marker.getPosition();
+  const box = document.getElementById('reportCoordDisplay');
+  box.style.display = 'block';
+  box.textContent = `위치: ${p.getLat().toFixed(6)}, ${p.getLng().toFixed(6)}`;
+  updateReportSubmitState();
+}
+
+function onReportPhotoSelected(evt){
+  const file = evt.target.files[0];
+  const preview = document.getElementById('reportPhotoPreview');
+  reportState.photoDataUrl = null;
+  reportState.photoGPS = null;
+  preview.innerHTML = '';
+  if(!file) { updateReportSubmitState(); return; }
+
+  // 1) 축소 썸네일 생성(저장 용량 절약)
+  const imgUrl = URL.createObjectURL(file);
+  const imgEl = new Image();
+  imgEl.onload = ()=>{
+    const maxW = 480;
+    const scale = Math.min(1, maxW / imgEl.width);
+    const canvas = document.createElement('canvas');
+    canvas.width = imgEl.width * scale;
+    canvas.height = imgEl.height * scale;
+    canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+    reportState.photoDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+    preview.innerHTML = `<img src="${reportState.photoDataUrl}">`;
+    URL.revokeObjectURL(imgUrl);
+    updateReportSubmitState();
+  };
+  imgEl.src = imgUrl;
+
+  // 2) 원본 바이트에서 EXIF GPS 파싱
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const gps = parseExifGPS(e.target.result);
+    reportState.photoGPS = gps;
+    const badge = document.createElement('div');
+    if(gps){
+      badge.className = 'gps-badge ok';
+      badge.textContent = `📍 사진에 위치정보 있음 (${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)})`;
+    } else {
+      badge.className = 'gps-badge warn';
+      badge.textContent = '⚠️ 사진에서 위치정보를 찾지 못했습니다 — 관리자 확인 후 반영됩니다';
+    }
+    preview.appendChild(badge);
+    updateReportSubmitState();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function updateReportSubmitState(){
+  const reason = document.getElementById('reportReason').value.trim();
+  const ready = !!reportState.marker && !!reportState.photoDataUrl && reason.length > 0;
+  document.getElementById('reportSubmitBtn').disabled = !ready;
+}
+
+function submitReport(){
+  const type = reportState.type;
+  const reason = document.getElementById('reportReason').value.trim();
+  if(!reportState.marker || !reportState.photoDataUrl || !reason) return;
+
+  const p = reportState.marker.getPosition();
+  const proposedLat = p.getLat(), proposedLng = p.getLng();
+  const target = reportState.targetId ? markerObjs[reportState.targetId] : null;
+
+  // 거리 비교 기준: edit/add는 "제안 위치" vs "사진GPS", delete는 "제출자가 지금 있는 위치"(=제안위치) vs "기존 등록좌표"
+  let distance = null, autoApproved = false;
+  if(type==='delete'){
+    if(target) distance = haversineMeters(proposedLat, proposedLng, target.record.lat, target.record.lng);
+    autoApproved = distance!=null && distance <= AUTO_APPROVE_RADIUS_M;
+  } else if(reportState.photoGPS){
+    distance = haversineMeters(proposedLat, proposedLng, reportState.photoGPS.lat, reportState.photoGPS.lng);
+    autoApproved = distance <= AUTO_APPROVE_RADIUS_M;
+  }
+
+  const entry = {
+    id: newId(), type, targetId: reportState.targetId,
+    addr: target ? (target.record.addr||'') : '',
+    oldLat: target ? target.record.lat : null, oldLng: target ? target.record.lng : null,
+    newLat: proposedLat, newLng: proposedLng,
+    reason, photoDataUrl: reportState.photoDataUrl, photoGPS: reportState.photoGPS,
+    distance, submittedAt: Date.now(), resolvedAt: null,
+    status: autoApproved ? 'auto_approved' : 'pending'
+  };
+
+  const msg = document.getElementById('reportMsg');
+
+  if(autoApproved){
+    applyApprovedChange(entry); // 실제 반영
+    entry.resolvedAt = Date.now();
+    msg.textContent = `✅ ${Math.round(distance)}m 이내로 확인되어 자동 처리되었습니다. 지도에 즉시 반영됐어요.`;
+    msg.className = 'msg ok'; msg.style.display = 'block';
+  } else {
+    msg.textContent = distance!=null
+      ? `기준 거리(${AUTO_APPROVE_RADIUS_M}m)를 넘어 자동처리가 안 됐습니다(${Math.round(distance)}m 차이). 관리자 확인 후 반영됩니다.`
+      : '사진에서 위치정보를 찾지 못해 관리자 확인 후 반영됩니다.';
+    msg.className = 'msg ok'; msg.style.display = 'block';
+  }
+
+  // 자동승인이든 대기든 무조건 이력에 남김 — 관리자가 전체 변경이력을 확인할 수 있게
+  const reqs = loadRequests();
+  reqs.push(entry);
+  saveRequests(reqs);
+  refreshRequestBadge();
+
+  setTimeout(()=>{ closeReportFlow(); }, 1600);
+}
+
+// 승인(자동 또는 관리자 수동)된 변경을 실제 지도/데이터에 반영
+function applyApprovedChange(entry){
+  if(entry.type==='add'){
+    const rec = {id:newId(), lat:entry.newLat, lng:entry.newLng, addr:entry.addr||'', note:''};
+    upsertRecord(rec);
+    addMarkerToMap(rec);
+    entry.targetId = rec.id; // 이후 이력에서 어떤 레코드가 생성됐는지 추적 가능하게
+  } else if(entry.type==='delete'){
+    const target = markerObjs[entry.targetId];
+    if(target){ clusterer.removeMarker(target.marker); delete markerObjs[entry.targetId]; }
+    deleteRecord(entry.targetId);
+  } else { // edit
+    const target = markerObjs[entry.targetId];
+    if(target){
+      const rec = {...target.record, lat:entry.newLat, lng:entry.newLng, region: undefined};
+      upsertRecord(rec);
+      target.record = rec;
+      target.marker.setPosition(new kakao.maps.LatLng(entry.newLat, entry.newLng));
+    }
+  }
+  clusterer.redraw();
+  classifyMissingRegions();
+}
+
+/* ---- 최소 EXIF GPS 파서 (JPEG 전용, 외부 라이브러리 없이 직접 구현) ---- */
+function parseExifGPS(arrayBuffer){
+  try{
+    const view = new DataView(arrayBuffer);
+    if(view.getUint16(0) !== 0xFFD8) return null; // JPEG 시그니처 아님
+    let offset = 2;
+    while(offset < view.byteLength){
+      const marker = view.getUint16(offset);
+      if(marker === 0xFFE1){ // APP1 (EXIF)
+        const segLen = view.getUint16(offset+2);
+        const tiffStart = offset + 4 + 6; // 'Exif\0\0' 6바이트 다음이 TIFF 헤더
+        if(view.getUint32(offset+4) !== 0x45786966) return null; // "Exif"
+        const little = view.getUint16(tiffStart) === 0x4949;
+        const ifd0Offset = tiffStart + view.getUint32(tiffStart+4, little);
+        const gpsIfdPtr = findTag(view, tiffStart, ifd0Offset, 0x8825, little);
+        if(gpsIfdPtr == null) return null;
+        const gpsIfd = tiffStart + gpsIfdPtr;
+
+        const latRef = readAscii(view, tiffStart, gpsIfd, 0x0001, little);
+        const lat = readRational3(view, tiffStart, gpsIfd, 0x0002, little);
+        const lngRef = readAscii(view, tiffStart, gpsIfd, 0x0003, little);
+        const lng = readRational3(view, tiffStart, gpsIfd, 0x0004, little);
+        if(lat==null || lng==null) return null;
+
+        let latDeg = lat[0] + lat[1]/60 + lat[2]/3600;
+        let lngDeg = lng[0] + lng[1]/60 + lng[2]/3600;
+        if(latRef === 'S') latDeg = -latDeg;
+        if(lngRef === 'W') lngDeg = -lngDeg;
+        return { lat: latDeg, lng: lngDeg };
+      } else if((marker & 0xFF00) !== 0xFF00){
+        break; // 마커가 아닌 구간 도달 — 중단
+      } else {
+        offset += 2 + view.getUint16(offset+2);
+      }
+    }
+    return null;
+  }catch(e){
+    console.error('EXIF GPS 파싱 실패', e);
+    return null;
+  }
+}
+function findIFDEntry(view, tiffStart, ifdOffset, tag, little){
+  const count = view.getUint16(ifdOffset, little);
+  for(let i=0;i<count;i++){
+    const entryOffset = ifdOffset + 2 + i*12;
+    if(view.getUint16(entryOffset, little) === tag) return entryOffset;
+  }
+  return null;
+}
+function findTag(view, tiffStart, ifdOffset, tag, little){
+  const e = findIFDEntry(view, tiffStart, ifdOffset, tag, little);
+  if(e==null) return null;
+  return view.getUint32(e+8, little);
+}
+function readAscii(view, tiffStart, ifdOffset, tag, little){
+  const e = findIFDEntry(view, tiffStart, ifdOffset, tag, little);
+  if(e==null) return null;
+  return String.fromCharCode(view.getUint8(e+8));
+}
+function readRational3(view, tiffStart, ifdOffset, tag, little){
+  const e = findIFDEntry(view, tiffStart, ifdOffset, tag, little);
+  if(e==null) return null;
+  const valueOffset = tiffStart + view.getUint32(e+8, little);
+  const out = [];
+  for(let i=0;i<3;i++){
+    const num = view.getUint32(valueOffset + i*8, little);
+    const den = view.getUint32(valueOffset + i*8 + 4, little);
+    out.push(den ? num/den : 0);
+  }
+  return out;
+}
+
+/* =========================================================
+   안전교육 패널 (심폐소생술 / 구조장비 사용법 / AED 사용법)
+   ========================================================= */
+function openEduPanel(){ document.getElementById('eduPanel').classList.add('show'); }
+function closeEduPanel(){
+  document.getElementById('eduPanel').classList.remove('show');
+  stopMetronome();
+}
+function switchEdu(name){
+  document.querySelectorAll('.edu-tab').forEach(t=>t.classList.toggle('active', t.dataset.edu===name));
+  document.querySelectorAll('.edu-section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('edu-'+name).classList.add('active');
+  if(name!=='cpr') stopMetronome();
+}
+
+// 압박 속도 메트로놈 — 분당 110회(2025 가이드라인 100~120회 권장 구간의 중간값), 순수 합성음(Web Audio API)
+let metroCtx = null, metroTimer = null, metroOn = false;
+const METRO_BPM = 110;
+
+function toggleMetronome(){
+  if(metroOn) stopMetronome(); else startMetronome();
+}
+function startMetronome(){
+  if(!metroCtx) metroCtx = new (window.AudioContext || window.webkitAudioContext)();
+  metroOn = true;
+  document.getElementById('metroBtn').textContent = '⏹ 정지 (재생 중 · 분당 110회)';
+  document.getElementById('metroBtn').classList.add('playing');
+  const intervalMs = 60000 / METRO_BPM;
+  const beep = ()=>{
+    const osc = metroCtx.createOscillator();
+    const gain = metroCtx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.35, metroCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, metroCtx.currentTime + 0.08);
+    osc.connect(gain).connect(metroCtx.destination);
+    osc.start();
+    osc.stop(metroCtx.currentTime + 0.09);
+  };
+  beep();
+  metroTimer = setInterval(beep, intervalMs);
+}
+function stopMetronome(){
+  metroOn = false;
+  if(metroTimer) clearInterval(metroTimer);
+  const btn = document.getElementById('metroBtn');
+  if(btn){ btn.textContent = '🔊 압박 속도 메트로놈 재생 (분당 110회)'; btn.classList.remove('playing'); }
+}
+
+function openDirections(){
+  const rec = markerObjs[currentMarkerId].record;
+  const name = encodeURIComponent(rec.addr || '인명구조함');
+  // 카카오맵 길찾기 딥링크: 앱 설치돼 있으면 카카오맵 앱으로, 아니면 웹으로 열림
+  const url = `https://map.kakao.com/link/to/${name},${rec.lat},${rec.lng}`;
+
+  // 코르도바로 패키징된 앱 안에서는 웹뷰가 아니라 OS(시스템 브라우저/딥링크 처리)로 넘겨야
+  // "페이지를 찾을 수 없음" 없이 카카오맵 앱 실행/브라우저 열기가 정상 동작함.
+  if(window.cordova && window.cordova.InAppBrowser){
+    cordova.InAppBrowser.open(url, '_system', 'location=yes');
+  } else if(window.cordova){
+    // InAppBrowser 플러그인이 아직 설치 전이면 임시로 일반 링크 이동으로 시도
+    console.warn('cordova-plugin-inappbrowser가 설치되어 있지 않습니다. 길찾기가 실패할 수 있습니다.');
+    location.href = url;
+  } else {
+    window.open(url, '_blank'); // 일반 웹 브라우저
+  }
+}
+
+function closeMarkerSheet(){
+  document.getElementById('markerOverlay').classList.remove('show');
+}
+function refreshMarkerSheetIfOpen(id, msg){
+  if(currentMarkerId===id && document.getElementById('markerOverlay').classList.contains('show')){
+    openMarkerSheet(id);
+    if(msg){
+      const m = document.getElementById('markerMsg');
+      m.textContent = msg; m.className='msg ok'; m.style.display='block';
+    }
+  }
+}
+
+function startEditCoord(){
+  if(!isAdmin) return;
+  const rec = markerObjs[currentMarkerId].record;
+  document.getElementById('editLat').value = rec.lat;
+  document.getElementById('editLng').value = rec.lng;
+  document.getElementById('editAddr').value = rec.addr || '';
+  document.getElementById('editFields').classList.add('show');
+  document.getElementById('markerActions').style.display='none';
+  document.getElementById('editActions').style.display='flex';
+}
+function cancelEditCoord(){
+  document.getElementById('editFields').classList.remove('show');
+  document.getElementById('markerActions').style.display='flex';
+  document.getElementById('editActions').style.display='none';
+}
+function saveEditCoord(){
+  const lat = parseFloat(document.getElementById('editLat').value);
+  const lng = parseFloat(document.getElementById('editLng').value);
+  const addr = document.getElementById('editAddr').value.trim();
+  if(isNaN(lat) || isNaN(lng)){
+    const m=document.getElementById('markerMsg'); m.textContent='위도/경도를 숫자로 입력하세요.'; m.className='msg err'; m.style.display='block';
+    return;
+  }
+  const rec = {...markerObjs[currentMarkerId].record, lat, lng, addr, region: undefined};
+  upsertRecord(rec);
+  markerObjs[currentMarkerId].record = rec;
+  markerObjs[currentMarkerId].marker.setPosition(new kakao.maps.LatLng(lat,lng));
+  clusterer.redraw();
+  cancelEditCoord();
+  classifyMissingRegions();
+  refreshMarkerSheetIfOpen(currentMarkerId, '좌표가 저장되었습니다.');
+}
+
+function toggleMoveMode(){
+  if(!isAdmin) return;
+  const id = currentMarkerId;
+  const marker = markerObjs[id].marker;
+  if(moveModeId === id){
+    marker.setDraggable(false);
+    moveModeId = null;
+  } else {
+    if(moveModeId) markerObjs[moveModeId].marker.setDraggable(false);
+    marker.setDraggable(true);
+    moveModeId = id;
+  }
+  document.getElementById('moveBtn').textContent = (moveModeId===id) ? '이동 완료' : '아이콘 이동';
+  const m=document.getElementById('markerMsg');
+  m.textContent = (moveModeId===id) ? '지도를 길게 눌러 아이콘을 드래그하세요.' : '';
+  m.className='msg ok'; m.style.display = moveModeId===id ? 'block':'none';
+}
+
+function deleteMarker(){
+  if(!isAdmin) return;
+  if(!confirm('이 구조함을 삭제할까요? 되돌릴 수 없습니다.')) return;
+  const id = currentMarkerId;
+  clusterer.removeMarker(markerObjs[id].marker);
+  deleteRecord(id);
+  delete markerObjs[id];
+  closeMarkerSheet();
+}
+
+/* =========================================================
+   관리자 진입 (코드 22222)
+   ========================================================= */
+let codeBuffer = '';
+document.getElementById('adminEntry').addEventListener('click', openCodeOverlay);
+
+function openCodeOverlay(){
+  codeBuffer = '';
+  renderCodeDots();
+  document.getElementById('codeErr').style.display='none';
+  buildKeypad();
+  document.getElementById('codeOverlay').classList.add('show');
+}
+function closeCodeOverlay(){
+  document.getElementById('codeOverlay').classList.remove('show');
+}
+function buildKeypad(){
+  const nums = ['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  const kp = document.getElementById('keypad');
+  kp.innerHTML='';
+  nums.forEach(n=>{
+    const b = document.createElement('button');
+    b.textContent = n;
+    if(n==='') b.style.visibility='hidden';
+    b.onclick = ()=>onKeypad(n);
+    kp.appendChild(b);
+  });
+}
+function onKeypad(n){
+  if(n==='' ) return;
+  if(n==='⌫'){ codeBuffer = codeBuffer.slice(0,-1); renderCodeDots(); return; }
+  if(codeBuffer.length>=5) return;
+  codeBuffer += n;
+  renderCodeDots();
+  if(codeBuffer.length===5){
+    setTimeout(()=>{
+      if(codeBuffer===ADMIN_CODE){
+        closeCodeOverlay();
+        enterAdminMode();
+      } else {
+        document.getElementById('codeErr').style.display='block';
+        codeBuffer='';
+        renderCodeDots();
+      }
+    }, 150);
+  }
+}
+function renderCodeDots(){
+  const dots = document.querySelectorAll('#codeDots span');
+  dots.forEach((d,i)=> d.classList.toggle('filled', i < codeBuffer.length));
+}
+
+let isAdmin = false;
+function enterAdminMode(){
+  isAdmin = true;
+  document.getElementById('adminEntry').classList.add('active');
+  document.getElementById('addReportEntry').style.display = 'none';
+  openAdminDash();
+}
+function logoutAdmin(){
+  isAdmin = false;
+  document.getElementById('adminEntry').classList.remove('active');
+  document.getElementById('addReportEntry').style.display = 'block';
+  closeAdminDash();
+}
+function closeAdminDash(){ document.getElementById('adminDash').classList.remove('show'); }
+function openAdminDash(){
+  document.getElementById('adminDash').classList.add('show');
+  refreshRequestBadge();
+  initNewMapPicker(); // 기본 활성 탭이 신규입력이라 여기서 바로 지도 초기화
+  // 대량수정 표(3천여 건)는 그 탭을 실제로 열 때만 그림 — 진입 시엔 렌더링 안 함(성능)
+}
+
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+name).classList.add('active');
+  if(name==='bulkEdit') buildBulkEditTable();
+  if(name==='requests') renderRequestsList();
+  if(name==='history') renderHistoryList();
+  if(name==='new') initNewMapPicker();
+}
+
+/* ---------------- 신규입력 지도 피커 (직접입력과 병행) ---------------- */
+let newMapPicker = null, newPickMarker = null;
+const NEW_PICK_ICON = () => new kakao.maps.MarkerImage(
+  'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><circle cx="15" cy="15" r="12" fill="#FF6B35" stroke="#fff" stroke-width="3"/></svg>`
+  ), new kakao.maps.Size(30,30), { offset: new kakao.maps.Point(15,15) }
+);
+
+function initNewMapPicker(){
+  const container = document.getElementById('newMapPicker');
+  if(!container || !window.kakao || !kakao.maps) return;
+  if(newMapPicker){
+    setTimeout(()=>newMapPicker.relayout(), 0); // 탭 전환 직후 컨테이너 크기 재계산
+    return;
+  }
+  const center = (map ? map.getCenter() : new kakao.maps.LatLng(37.78, 128.95));
+  newMapPicker = new kakao.maps.Map(container, { center, level: 6 });
+  newPickMarker = new kakao.maps.Marker({ position: center, map: newMapPicker, draggable: true, image: NEW_PICK_ICON() });
+
+  kakao.maps.event.addListener(newPickMarker, 'dragend', ()=>{
+    const p = newPickMarker.getPosition();
+    setNewLatLngFields(p.getLat(), p.getLng());
+  });
+  kakao.maps.event.addListener(newMapPicker, 'click', (mouseEvent)=>{
+    newPickMarker.setPosition(mouseEvent.latLng);
+    setNewLatLngFields(mouseEvent.latLng.getLat(), mouseEvent.latLng.getLng());
+  });
+}
+
+function setNewLatLngFields(lat, lng){
+  document.getElementById('newLat').value = lat.toFixed(6);
+  document.getElementById('newLng').value = lng.toFixed(6);
+}
+
+// 위도/경도를 직접 타이핑했을 때도 지도 위 아이콘이 같이 따라 움직이게(병행 동작)
+function onNewLatLngTyped(){
+  if(!newMapPicker || !newPickMarker) return;
+  const lat = parseFloat(document.getElementById('newLat').value);
+  const lng = parseFloat(document.getElementById('newLng').value);
+  if(isNaN(lat) || isNaN(lng)) return;
+  const pos = new kakao.maps.LatLng(lat, lng);
+  newPickMarker.setPosition(pos);
+  newMapPicker.setCenter(pos);
+}
+
+/* ---------------- 수정요청 확인(관리자) ---------------- */
+function refreshRequestBadge(){
+  const n = loadRequests().filter(r=>r.status==='pending').length;
+  const badge = document.getElementById('reqBadge');
+  if(n>0){ badge.textContent = n; badge.style.display='inline-block'; }
+  else badge.style.display='none';
+}
+
+const TYPE_LABEL = { edit:'📍 위치수정', add:'➕ 신규제보', delete:'🗑 삭제신고' };
+const STATUS_LABEL = {
+  pending: '대기중', auto_approved: '자동승인', approved: '관리자승인', rejected: '반려됨'
+};
+const STATUS_COLOR = {
+  pending: 'var(--ink-soft)', auto_approved: '#1E8E5A', approved: '#1E8E5A', rejected: 'var(--danger)'
+};
+
+function renderReqCard(r, actionable){
+  const dist = r.distance!=null ? `${Math.round(r.distance)}m 차이` : '위치정보 없음';
+  const gpsLine = r.photoGPS ? `사진 GPS: ${r.photoGPS.lat.toFixed(6)}, ${r.photoGPS.lng.toFixed(6)}` : '사진에 위치정보 없음';
+  const coordLine = r.type==='add'
+    ? `<b>제안 좌표</b>: ${r.newLat.toFixed(6)}, ${r.newLng.toFixed(6)}`
+    : `<b>기존 좌표</b>: ${(r.oldLat??0).toFixed(6)}, ${(r.oldLng??0).toFixed(6)}<br><b>제안/확인 좌표</b>: ${r.newLat.toFixed(6)}, ${r.newLng.toFixed(6)}`;
+  return `
+    <div class="req-card">
+      <img src="${r.photoDataUrl}">
+      <div class="req-meta">
+        <b>${TYPE_LABEL[r.type]||r.type}</b> · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
+        <b>대상</b>: ${r.addr || '(주소 미입력)'}<br>
+        ${coordLine}<br>
+        <b>사유</b>: ${(r.reason||'').replace(/</g,'&lt;')}<br>
+        <b>${gpsLine}</b> · ${dist}<br>
+        접수: ${new Date(r.submittedAt).toLocaleString('ko-KR')}
+        ${r.resolvedAt ? `<br>처리: ${new Date(r.resolvedAt).toLocaleString('ko-KR')}` : ''}
+      </div>
+      ${actionable ? `
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="rejectRequest('${r.id}')">반려</button>
+        <button class="btn btn-primary btn-sm" onclick="approveRequest('${r.id}')">승인하고 반영</button>
+      </div>` : ''}
+    </div>`;
+}
+
+function renderRequestsList(){
+  const list = loadRequests().filter(r=>r.status==='pending').sort((a,b)=>b.submittedAt-a.submittedAt);
+  const box = document.getElementById('requestsList');
+  refreshRequestBadge();
+  if(!list.length){ box.innerHTML = `<div style="text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;">대기 중인 요청이 없습니다.</div>`; return; }
+  box.innerHTML = list.map(r=>renderReqCard(r, true)).join('');
+}
+
+function renderHistoryList(){
+  const q = (document.getElementById('historySearch')?.value || '').trim().toLowerCase();
+  let list = loadRequests().sort((a,b)=>b.submittedAt-a.submittedAt);
+  if(q) list = list.filter(r => (r.addr||'').toLowerCase().includes(q) || (r.reason||'').toLowerCase().includes(q));
+  const box = document.getElementById('historyList');
+  if(!box) return;
+  document.getElementById('historyCount').textContent = list.length;
+  if(!list.length){ box.innerHTML = `<div style="text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;">이력이 없습니다.</div>`; return; }
+  box.innerHTML = list.map(r=>renderReqCard(r, false)).join('');
+}
+
+function approveRequest(id){
+  const list = loadRequests();
+  const req = list.find(r=>r.id===id);
+  if(!req) return;
+  applyApprovedChange(req);
+  req.status = 'approved';
+  req.resolvedAt = Date.now();
+  saveRequests(list);
+  renderRequestsList();
+  buildBulkEditTable();
+}
+
+function rejectRequest(id){
+  const list = loadRequests();
+  const req = list.find(r=>r.id===id);
+  if(!req) return;
+  req.status = 'rejected';
+  req.resolvedAt = Date.now();
+  saveRequests(list);
+  renderRequestsList();
+}
+
+/* ---------------- 신규입력 ---------------- */
+function addSingle(){
+  const lat = parseFloat(document.getElementById('newLat').value);
+  const lng = parseFloat(document.getElementById('newLng').value);
+  const addr = document.getElementById('newAddr').value.trim();
+  const note = document.getElementById('newNote').value.trim();
+  const msg = document.getElementById('newMsg');
+  if(isNaN(lat) || isNaN(lng)){
+    msg.textContent='위도/경도를 정확히 입력하세요.'; msg.className='msg err'; msg.style.display='block'; return;
+  }
+  const rec = {id:newId(), lat, lng, addr, note};
+  upsertRecord(rec);
+  addMarkerToMap(rec);
+  classifyMissingRegions();
+  msg.textContent='등록되었습니다. 지도에 즉시 반영됩니다.'; msg.className='msg ok'; msg.style.display='block';
+  document.getElementById('newLat').value='';
+  document.getElementById('newLng').value='';
+  document.getElementById('newAddr').value='';
+  document.getElementById('newNote').value='';
+  buildBulkEditTable();
+}
+
+/* ---------------- 대량입력 ---------------- */
+function parseBulkNew(){
+  const text = document.getElementById('bulkNewArea').value.trim();
+  const msg = document.getElementById('bulkNewMsg');
+  const preview = document.getElementById('bulkPreview');
+  if(!text){ msg.textContent='입력된 내용이 없습니다.'; msg.className='msg err'; msg.style.display='block'; preview.innerHTML=''; return; }
+
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const parsed = []; const errors = [];
+  lines.forEach((line, idx)=>{
+    const parts = line.split(',').map(s=>s.trim());
+    const lat = parseFloat(parts[0]); const lng = parseFloat(parts[1]);
+    if(parts.length < 2 || isNaN(lat) || isNaN(lng)){
+      errors.push(idx+1);
+    } else {
+      parsed.push({id:newId(), lat, lng, addr: parts[2]||'', note: parts[3]||''});
+    }
+  });
+
+  if(errors.length){
+    msg.textContent = `${errors.length}줄 형식 오류 (줄 번호: ${errors.join(', ')}) — 해당 줄을 제외한 ${parsed.length}건만 등록됩니다.`;
+    msg.className='msg err'; msg.style.display='block';
+  } else {
+    msg.textContent = `${parsed.length}건 확인 완료.`; msg.className='msg ok'; msg.style.display='block';
+  }
+
+  preview.innerHTML = `
+    <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">${parsed.length}건 등록 예정</div>
+    <button class="btn btn-orange" style="margin-top:8px;" id="confirmBulkBtn">전체 등록하기</button>
+  `;
+  document.getElementById('confirmBulkBtn').onclick = ()=>{
+    parsed.forEach(rec=>{ upsertRecord(rec); addMarkerToMap(rec); });
+    classifyMissingRegions();
+    msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
+    document.getElementById('bulkNewArea').value='';
+    preview.innerHTML='';
+    buildBulkEditTable();
+  };
+}
+
+/* ---------------- 엑셀 열 이름 인식 ---------------- */
+// 한글/영문 헤더 둘 다 허용. 실제 셀 값에서 위도/경도/주소/비고/id를 찾아준다.
+const COL_ALIASES = {
+  lat:  ['위도','lat','latitude'],
+  lng:  ['경도','lng','lon','long','longitude'],
+  addr: ['주소','위치','설명','addr','address'],
+  note: ['비고','메모','note','remark'],
+  id:   ['id','아이디','고유번호'],
+  action:['구분','작업','action','type']
+};
+function findCol(headerRow, key){
+  const names = COL_ALIASES[key];
+  for(let i=0;i<headerRow.length;i++){
+    const h = String(headerRow[i]||'').trim().toLowerCase();
+    if(names.some(n=>h===n.toLowerCase())) return i;
+  }
+  return -1;
+}
+function readSheetAsRows(file, cb){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const wb = XLSX.read(e.target.result, {type:'array'});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:true, defval:''});
+    cb(rows);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/* ---------------- 대량입력: 엑셀 업로드 ---------------- */
+function downloadBulkNewTemplate(){
+  const rows = [
+    ['위도','경도','주소','비고'],
+    ['37.791666','128.922927','강동면 안인진리 159-60','방파제(TTP) - 이 예시 줄은 지우고 쓰세요']
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:12},{wch:12},{wch:34},{wch:22}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '신규등록양식');
+  XLSX.writeFile(wb, '구조함_신규입력_양식.xlsx');
+}
+
+function parseBulkNewExcel(evt){
+  const file = evt.target.files[0];
+  const msg = document.getElementById('bulkNewFileMsg');
+  const preview = document.getElementById('bulkFilePreview');
+  if(!file) return;
+  readSheetAsRows(file, (rows)=>{
+    if(rows.length < 2){ msg.textContent='데이터가 없습니다.'; msg.className='msg err'; msg.style.display='block'; return; }
+    const header = rows[0];
+    const iLat = findCol(header,'lat'), iLng = findCol(header,'lng');
+    const iAddr = findCol(header,'addr'), iNote = findCol(header,'note');
+    if(iLat===-1 || iLng===-1){
+      msg.textContent = '위도/경도 열을 찾지 못했습니다. 첫 행 머리글을 "위도, 경도, 주소, 비고"로 맞춰주세요.';
+      msg.className='msg err'; msg.style.display='block'; return;
+    }
+    const parsed = []; let errCount = 0;
+    for(let r=1; r<rows.length; r++){
+      const row = rows[r];
+      if(!row || row.length===0) continue;
+      const lat = parseFloat(row[iLat]); const lng = parseFloat(row[iLng]);
+      if(isNaN(lat) || isNaN(lng)){ errCount++; continue; }
+      parsed.push({
+        id:newId(), lat, lng,
+        addr: iAddr>-1 ? String(row[iAddr]||'') : '',
+        note: iNote>-1 ? String(row[iNote]||'') : ''
+      });
+    }
+    msg.textContent = `${parsed.length}건 인식됨${errCount? `, ${errCount}행은 좌표 오류로 제외`:''}`;
+    msg.className='msg ok'; msg.style.display='block';
+    preview.innerHTML = `<button class="btn btn-orange" style="margin-top:10px;" id="confirmExcelBtn">${parsed.length}건 전체 등록하기</button>`;
+    document.getElementById('confirmExcelBtn').onclick = ()=>{
+      parsed.forEach(rec=>{ upsertRecord(rec); addMarkerToMap(rec); });
+      classifyMissingRegions();
+      msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`;
+      preview.innerHTML=''; evt.target.value='';
+      buildBulkEditTable();
+    };
+  });
+}
+
+/* ---------------- 대량수정: 엑셀 내보내기/가져오기 (구분: 신규/수정/삭제) ---------------- */
+function exportToExcel(){
+  const list = loadRecords();
+  const rows = [['id','구분','주소','위도','경도','비고'], ['', '신규(예시)', '강동면 안인진리 000-0', '37.000000', '128.900000', '']];
+  list.forEach(r=> rows.push([r.id, '', r.addr||'', r.lat, r.lng, r.note||'']));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:14},{wch:12},{wch:34},{wch:14},{wch:14},{wch:18}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '구조함목록');
+  const ts = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `구조함_목록_${ts}.xlsx`);
+}
+function importBulkEditExcel(evt){
+  const file = evt.target.files[0];
+  const msg = document.getElementById('bulkEditFileMsg');
+  if(!file) return;
+  readSheetAsRows(file, (rows)=>{
+    if(rows.length < 2){ msg.textContent='데이터가 없습니다.'; msg.className='msg err'; msg.style.display='block'; return; }
+    const header = rows[0];
+    const iId = findCol(header,'id'), iLat = findCol(header,'lat'), iLng = findCol(header,'lng');
+    const iAddr = findCol(header,'addr'), iNote = findCol(header,'note'), iAction = findCol(header,'action');
+    if(iLat===-1 || iLng===-1){
+      msg.textContent = '위도/경도 열을 찾지 못했습니다. "현재 목록 내보내기"로 받은 형식 그대로 사용하세요.';
+      msg.className='msg err'; msg.style.display='block'; return;
+    }
+    const existing = loadRecords();
+    const byId = {}; existing.forEach(r=> byId[r.id]=r);
+    let added=0, updated=0, deleted=0, notFound=0, badCoord=0;
+
+    for(let r=1; r<rows.length; r++){
+      const row = rows[r];
+      if(!row || row.length===0) continue;
+      const id = iId>-1 ? String(row[iId]||'').trim() : '';
+      const actionRaw = iAction>-1 ? String(row[iAction]||'').trim() : '';
+      const action = actionRaw.includes('삭제') ? '삭제' : actionRaw.includes('신규') ? '신규' : (id && byId[id]) ? '수정' : (id ? '' : '신규');
+      const isExampleRow = actionRaw.includes('예시');
+      if(isExampleRow) continue;
+
+      if(action==='삭제'){
+        if(id && byId[id]){
+          if(markerObjs[id]){ clusterer.removeMarker(markerObjs[id].marker); delete markerObjs[id]; }
+          deleteRecord(id);
+          deleted++;
+        } else notFound++;
+        continue;
+      }
+
+      const lat = parseFloat(row[iLat]); const lng = parseFloat(row[iLng]);
+      if(isNaN(lat) || isNaN(lng)){ badCoord++; continue; }
+
+      if(action==='신규' || !id || !byId[id]){
+        const rec = {
+          id:newId(), lat, lng,
+          addr: iAddr>-1 ? String(row[iAddr]||'') : '',
+          note: iNote>-1 ? String(row[iNote]||'') : ''
+        };
+        upsertRecord(rec);
+        addMarkerToMap(rec);
+        added++;
+      } else {
+        const rec = {
+          id, lat, lng,
+          addr: iAddr>-1 ? String(row[iAddr]||'') : byId[id].addr,
+          note: iNote>-1 ? String(row[iNote]||'') : byId[id].note,
+          region: undefined
+        };
+        upsertRecord(rec);
+        if(markerObjs[id]){
+          markerObjs[id].record = rec;
+          markerObjs[id].marker.setPosition(new kakao.maps.LatLng(lat,lng));
+        }
+        updated++;
+      }
+    }
+    clusterer.redraw();
+    if(added>0) classifyMissingRegions();
+    msg.textContent = `신규 ${added}건 · 수정 ${updated}건 · 삭제 ${deleted}건 반영 완료`
+      + (notFound? ` · id 불일치(삭제 대상 못 찾음) ${notFound}건`:'')
+      + (badCoord? ` · 좌표 오류로 제외 ${badCoord}건`:'');
+    msg.className='msg ok'; msg.style.display='block';
+    evt.target.value='';
+    buildBulkEditTable();
+  });
+}
+
+/* ---------------- 대량수정 (검색 + 더보기로 대량 렌더 방지) ---------------- */
+const BULK_PAGE_SIZE = 100;
+let bulkFilteredList = [];
+let bulkRenderedCount = 0;
+
+function buildBulkEditTable(){
+  const all = loadRecords();
+  document.getElementById('totalCount').textContent = all.length;
+  populateBulkRegionFilter(all);
+  const q = (document.getElementById('bulkEditSearch').value||'').trim().toLowerCase();
+  const region = document.getElementById('bulkEditRegionFilter').value;
+  bulkFilteredList = all.filter(r=>{
+    const matchAddr = !q || (r.addr||'').toLowerCase().includes(q);
+    const matchRegion = region==='all' || r.region===region;
+    return matchAddr && matchRegion;
+  });
+  bulkRenderedCount = 0;
+  document.getElementById('bulkEditBody').innerHTML = '';
+  renderMoreBulkRows();
+}
+function populateBulkRegionFilter(all){
+  const sel = document.getElementById('bulkEditRegionFilter');
+  const prev = sel.value || 'all';
+  const counts = {};
+  all.forEach(r=>{ if(r.region) counts[r.region] = (counts[r.region]||0) + 1; });
+  const opts = [`<option value="all">행정구역: 전체 (${all.length}건)</option>`];
+  Object.keys(counts).sort().forEach(region=>{
+    opts.push(`<option value="${region}">${region} (${counts[region]}건)</option>`);
+  });
+  const newHtml = opts.join('');
+  if(sel.innerHTML !== newHtml){        // 값 유지한 채로 옵션만 갱신(분류 진행 중 계속 늘어남)
+    sel.innerHTML = newHtml;
+    sel.value = counts[prev] || prev==='all' ? prev : 'all';
+  }
+}
+function onBulkSearch(){ buildBulkEditTable(); }
+
+function renderMoreBulkRows(){
+  const body = document.getElementById('bulkEditBody');
+  const slice = bulkFilteredList.slice(bulkRenderedCount, bulkRenderedCount + BULK_PAGE_SIZE);
+  body.insertAdjacentHTML('beforeend', slice.map(r=>`
+    <tr data-id="${r.id}">
+      <td><input type="text" class="be-addr" value="${(r.addr||'').replace(/"/g,'&quot;')}"></td>
+      <td><input type="text" class="be-lat" value="${r.lat}" style="width:100px;"></td>
+      <td><input type="text" class="be-lng" value="${r.lng}" style="width:100px;"></td>
+      <td><input type="text" class="be-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
+      <td class="del" onclick="quickDelete('${r.id}')">🗑</td>
+    </tr>
+  `).join(''));
+  bulkRenderedCount += slice.length;
+  document.getElementById('visibleCount').textContent = bulkRenderedCount;
+
+  const moreBox = document.getElementById('bulkEditMore');
+  const remain = bulkFilteredList.length - bulkRenderedCount;
+  moreBox.innerHTML = remain > 0
+    ? `<button class="btn btn-ghost btn-sm" onclick="renderMoreBulkRows()">${remain}건 더 보기</button>`
+    : (bulkFilteredList.length===0 ? `<span style="font-size:12.5px;color:var(--ink-soft);">검색 결과 없음</span>` : '');
+}
+
+function quickDelete(id){
+  if(!confirm('이 구조함을 삭제할까요?')) return;
+  deleteRecord(id);
+  if(markerObjs[id]){ clusterer.removeMarker(markerObjs[id].marker); delete markerObjs[id]; }
+  buildBulkEditTable();
+}
+function saveBulkEdit(){
+  // 지금 화면(검색 결과 + 더보기로 로드된 만큼)에 보이는 행만 저장합니다.
+  const rows = document.querySelectorAll('#bulkEditBody tr');
+  let updated = 0, errors = 0;
+  rows.forEach(tr=>{
+    const id = tr.dataset.id;
+    const lat = parseFloat(tr.querySelector('.be-lat').value);
+    const lng = parseFloat(tr.querySelector('.be-lng').value);
+    const addr = tr.querySelector('.be-addr').value.trim();
+    const note = tr.querySelector('.be-note').value.trim();
+    if(isNaN(lat) || isNaN(lng)){ errors++; return; }
+    const rec = {id, lat, lng, addr, note, region: undefined};
+    upsertRecord(rec);
+    if(markerObjs[id]){
+      markerObjs[id].record = rec;
+      markerObjs[id].marker.setPosition(new kakao.maps.LatLng(lat,lng));
+    } else {
+      addMarkerToMap(rec);
+    }
+    updated++;
+  });
+  clusterer.redraw();
+  if(updated>0) classifyMissingRegions();
+  alert(`${updated}건 저장 완료${errors? `, ${errors}건은 좌표 오류로 건너뜀`:''}`);
+}
+</script>
+</body>
+</html>
