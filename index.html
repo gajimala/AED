@@ -930,11 +930,12 @@ function onRegionChange(){
 
 /* =========================================================
    AED(자동심장충격기) 레이어 — 조회 전용, 수정/삭제 없음, 길찾기만 가능
-   ⚠️ 실제 API 키는 브라우저(이 파일)에는 없습니다 — Cloudflare Worker 안에만 보관됩니다.
-   아래 AED_WORKER_URL에 배포한 Worker 주소를 넣어야 AED 조회가 동작합니다.
-   (aed-proxy-worker.js 파일 참고)
+   ⚠️ 이 키는 브라우저 소스에 그대로 노출됩니다(공개 저장소이므로 누구나 볼 수 있음).
+   나중에 여유 생기면 Cloudflare Worker로 숨기는 걸 권장하지만, 지금은 가입 없이
+   바로 동작하는 걸 우선해서 예전처럼 직접 호출 방식으로 되돌렸습니다.
    ========================================================= */
-const AED_WORKER_URL = 'https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev';
+const AED_SERVICE_KEY_ENCODED = 'TUbUhIiFWVRorR5hyktEuzY05oGV0Wd%2FTohPPdjOB27lUHRN521Oc6cJD%2BityxwoJzleTCzC%2BBYOroBVoyOxhA%3D%3D';
+const AED_API_URL = 'https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire';
 
 let aedState = { on:false, markers:[] };
 
@@ -977,7 +978,10 @@ async function loadAedForCurrentRegion(){
 async function fetchAed(sido, sigungu){
   clearAedMarkers();
   try{
-    const url = `${AED_WORKER_URL}?sido=${encodeURIComponent(sido)}&sigungu=${encodeURIComponent(sigungu)}&pageNo=1&numOfRows=100`;
+    // serviceKey는 이미 인코딩돼 있으므로 문자열로 직접 붙이고, 나머지 값만 encodeURIComponent 처리
+    const url = `${AED_API_URL}?serviceKey=${AED_SERVICE_KEY_ENCODED}`
+      + `&Q0=${encodeURIComponent(sido)}&Q1=${encodeURIComponent(sigungu)}`
+      + `&pageNo=1&numOfRows=100`;
     const res = await fetch(url);
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const text = await res.text();
