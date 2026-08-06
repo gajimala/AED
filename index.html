@@ -80,7 +80,7 @@
   }
   #aedInfoBox.show{display:block;}
   #addReportEntry{
-    position:fixed;left:14px;bottom:22px;z-index:500;
+    position:fixed;right:62px;bottom:22px;z-index:500;
     background:var(--orange);color:#fff;border:none;border-radius:24px;
     padding:11px 16px;font-size:13px;font-weight:700;box-shadow:0 3px 12px rgba(0,0,0,.22);
     cursor:pointer;
@@ -92,11 +92,9 @@
     display:flex;align-items:center;justify-content:center;
   }
   #eduBar{
-    position:fixed;left:14px;right:14px;bottom:78px;z-index:500;
-    display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;
-    scrollbar-width:none; -ms-overflow-style:none;
+    position:fixed;left:14px;bottom:22px;z-index:500;
+    display:flex;flex-direction:column;gap:8px;
   }
-  #eduBar::-webkit-scrollbar{display:none;}
   .edu-cat-btn{
     flex-shrink:0;
     background:#fff;border:1px solid var(--line);border-radius:20px;
@@ -251,8 +249,9 @@
   .edu-section.active{display:block;}
   .step-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;display:flex;gap:14px;align-items:flex-start;}
   .step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;}
-  .step-icon{flex:0 0 64px;}
+  .step-icon{flex:0 0 84px;}
   .step-icon svg{width:64px;height:64px;}
+  .step-icon img{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;}
   .step-text{flex:1;}
   .step-text .step-title{font-weight:700;font-size:14px;margin-bottom:3px;}
   .step-text .step-desc{font-size:12.5px;color:var(--ink-soft);line-height:1.55;}
@@ -414,43 +413,43 @@
 
       <div class="step-card">
         <div class="step-num">1</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="18" r="9" fill="none" stroke="#0B3454" stroke-width="3"/><path d="M32 27v20M20 34l12-7 12 7M18 55l14-8M46 55l-14-8" stroke="#0B3454" stroke-width="3" fill="none" stroke-linecap="round"/><text x="46" y="20" font-size="16">?</text></svg></div>
+                <div class="step-icon"><img src="./icon/edu/cpr1.jpg" alt="반응 확인"></div>
         <div class="step-text"><div class="step-title">반응 확인</div><div class="step-desc">어깨를 가볍게 두드리며 "괜찮으세요?" 라고 크게 물어봅니다. 반응이 없으면 심장정지를 의심합니다.</div></div>
       </div>
 
       <div class="step-card">
         <div class="step-num">2</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="22" y="10" width="20" height="34" rx="4" fill="none" stroke="#FF6B35" stroke-width="3"/><circle cx="32" cy="38" r="2" fill="#FF6B35"/><text x="26" y="30" font-size="14" fill="#FF6B35">119</text></svg></div>
+                <div class="step-icon"><img src="./icon/edu/cpr2.jpg" alt="119 신고"></div>
         <div class="step-text"><div class="step-title">119 신고 + AED 요청 (호흡 확인보다 먼저)</div><div class="step-desc">일반인은 호흡 상태 판단이 어려우므로, 반응이 없으면 <b>호흡을 확인하기 전에 즉시 119에 신고</b>합니다. 스피커폰을 켜고 구급상황요원의 안내를 따르세요. 주변에 사람이 있으면 신고와 AED 요청을 나눠서 부탁합니다.</div></div>
       </div>
 
       <div class="step-card">
         <div class="step-num">3</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><ellipse cx="32" cy="40" rx="15" ry="19" fill="none" stroke="#0FA3B1" stroke-width="3"/><circle cx="32" cy="14" r="8" fill="none" stroke="#0FA3B1" stroke-width="3"/><path d="M22 32 Q26 27 30 32 T38 32 T46 32" stroke="#0FA3B1" stroke-width="2.2" fill="none" stroke-linecap="round"/><path d="M20 40 Q26 36 32 40 T44 40" stroke="#0FA3B1" stroke-width="2.2" fill="none" opacity=".55" stroke-linecap="round"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/cpr3.jpg" alt="호흡 확인"></div>
         <div class="step-text"><div class="step-title">호흡 확인 (구급상황요원과 함께)</div><div class="step-desc">숨을 쉬는지, 정상 호흡인지 확인합니다. 숨을 안 쉬거나, 헐떡이는 비정상 호흡(심장정지 호흡)이면 심장정지로 판단하고 즉시 가슴압박을 시작합니다.</div></div>
       </div>
 
       <div class="step-card">
         <div class="step-num">4</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="16" y="10" width="32" height="44" rx="14" fill="none" stroke="#0B3454" stroke-width="3"/><ellipse cx="32" cy="41" rx="12" ry="6" fill="#FF6B35"/><ellipse cx="32" cy="37" rx="9" ry="5" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M32 15v16" stroke="#E4572E" stroke-width="3" stroke-linecap="round"/><path d="M25 24l7 9 7-9" stroke="#E4572E" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/cpr4.jpg" alt="가슴압박 자세"></div>
         <div class="step-text"><div class="step-title">가슴압박 — 위치와 자세</div><div class="step-desc"><b>복장뼈(가슴뼈) 아래쪽 절반</b> 지점에 한 손 손꿈치를 대고, 다른 손을 그 위에 겹쳐 깍지를 낍니다. 팔꿈치를 곧게 펴고 체중을 실어 수직으로 압박합니다. 주로 쓰는 손이 아래로 가는 것이 좋습니다.</div></div>
       </div>
 
       <div class="step-card">
         <div class="step-num">5</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M32 10v44M22 20l10-10 10 10M22 44l10 10 10-10" stroke="#E4572E" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/cpr5.jpg" alt="압박 속도 깊이"></div>
         <div class="step-text"><div class="step-title">압박 속도 · 깊이</div><div class="step-desc"><b>분당 100~120회</b> 속도로, <b>약 5cm 깊이</b>(6cm는 넘지 않게)로 압박합니다. 매번 압박 후에는 가슴이 완전히 원래대로 올라오도록 힘을 뺍니다(이완). 위 메트로놈 버튼으로 속도를 맞춰볼 수 있습니다. 2분마다 압박하는 사람을 교대하면 좋습니다.</div></div>
       </div>
 
       <div class="step-card">
         <div class="step-num">6</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M16,30 C16,16 27,8 34,8 C42,8 45,14 44,20 C48,20 47,25 43,25 C42,29 38,30 36,29 C36,34 32,36 28,35 C26,42 20,46 16,46 Z" fill="none" stroke="#0B3454" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="34" cy="17" r="1.7" fill="#0B3454"/><path d="M44 20 Q53 16 59 20" stroke="#0FA3B1" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M53 15l6 5-6 3" stroke="#0FA3B1" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/cpr6.jpg" alt="인공호흡"></div>
         <div class="step-text"><div class="step-title">인공호흡 (교육받았고 할 수 있으면)</div><div class="step-desc">가슴압박 30회 : 인공호흡 2회 비율로 반복합니다. 머리를 뒤로 젖히고 턱을 들어 기도를 연 뒤, 1초간 가슴이 올라올 정도로 불어넣습니다. <b>인공호흡을 못하거나 꺼려지면 압박만 계속</b>해도 괜찮습니다(가슴압박소생술) — 아무것도 안 하는 것보다 훨씬 낫습니다.</div></div>
       </div>
 
       <div class="step-card">
         <div class="step-num">7</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="22" fill="none" stroke="#1E8E5A" stroke-width="3"/><path d="M22 32l7 7 14-14" stroke="#1E8E5A" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/cpr7.jpg" alt="AED 사용 및 반복"></div>
         <div class="step-text"><div class="step-title">AED 도착 즉시 사용 + 반복</div><div class="step-desc">AED가 도착하면 즉시 사용합니다(사용법은 옆 탭). 구급대가 도착하거나, 환자가 움직이거나, 정상적으로 숨을 쉴 때까지 압박과 인공호흡을 반복합니다.</div></div>
       </div>
 
@@ -465,22 +464,22 @@
       <div class="step-title" style="margin:14px 0 8px;">🛟 구명환</div>
       <div class="step-card">
         <div class="step-num">1</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="20" fill="none" stroke="#FF6B35" stroke-width="6"/><circle cx="32" cy="32" r="20" fill="none" stroke="#fff" stroke-width="1"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/ring1.jpg" alt="구명환 꺼내기"></div>
         <div class="step-text"><div class="step-desc">발견 즉시 큰소리로 주변에 알리고 119에 신고합니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">2</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="18" cy="46" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><circle cx="46" cy="20" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M25 40 Q35 30 40 26" stroke="#E4572E" stroke-width="2.5" fill="none" stroke-dasharray="4,3"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/ring2.jpg" alt="로프 끝 잡기"></div>
         <div class="step-text"><div class="step-desc">구명환에 연결된 줄 끝을 발로 밟거나 손에 단단히 감아쥔 뒤, 대상자보다 바람이나 물살이 흘러오는 방향(상류) 쪽에서 던질 준비를 합니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">3</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="44" cy="24" r="9" fill="none" stroke="#FF6B35" stroke-width="3"/><circle cx="16" cy="46" r="6" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M22 42 Q32 30 38 26" stroke="#0B3454" stroke-width="2" fill="none" stroke-dasharray="3,3"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/ring3.jpg" alt="던지기"></div>
         <div class="step-text"><div class="step-desc">대상자의 몸 쪽 또는 살짝 넘어가도록 던져서, 대상자가 팔을 뻗어 구명환을 잡거나 몸에 걸칠 수 있게 합니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">4</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="10" fill="none" stroke="#FF6B35" stroke-width="3"/><path d="M32 42v14" stroke="#0B3454" stroke-width="2.5"/><path d="M20 62h24" stroke="#0B3454" stroke-width="2.5"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/ring4.jpg" alt="끌어당기기"></div>
         <div class="step-text"><div class="step-desc">대상자가 구명환을 양팔로 안거나 팔을 끼우게 한 뒤, 천천히 끌어당겨 안전한 곳으로 이동시킵니다.</div></div>
       </div>
 
@@ -504,22 +503,22 @@
       <div class="step-title" style="margin:20px 0 8px;">🎯 드로우백 (구명로프)</div>
       <div class="step-card">
         <div class="step-num">1</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="20" y="24" width="16" height="20" rx="3" fill="none" stroke="#0B3454" stroke-width="3"/><path d="M28 24c0-8 8-8 8 0" stroke="#0B3454" stroke-width="2.5" fill="none"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/bag1.jpg" alt="드로우백 꺼내기"></div>
         <div class="step-text"><div class="step-desc">가방을 열어 로프가 코일 형태로 가지런히 들어있는지 확인합니다(엉켜있으면 던졌을 때 안 풀립니다).</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">2</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="20" cy="44" r="8" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M27 40 Q34 30 30 18" stroke="#FF6B35" stroke-width="2.5" fill="none" stroke-dasharray="4,3"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/bag2.jpg" alt="로프 끝 고정"></div>
         <div class="step-text"><div class="step-desc">가방 반대쪽 로프 끝을 자기 손목이나 손에 확실히 고정합니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">3</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="10" y="34" width="12" height="16" rx="3" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M22 40 Q34 24 46 20" stroke="#E4572E" stroke-width="2.5" fill="none"/><circle cx="46" cy="20" r="4" fill="none" stroke="#E4572E" stroke-width="2"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/bag3.jpg" alt="던지기"></div>
         <div class="step-text"><div class="step-desc">대상자를 향해 언더핸드로 가방을 던집니다. 대상자 몸 쪽이나 살짝 넘어가게 던지는 게 좋습니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">4</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="44" cy="20" r="7" fill="none" stroke="#FF6B35" stroke-width="2.5"/><circle cx="16" cy="46" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M23 42 Q32 30 38 24" stroke="#0B3454" stroke-width="2" fill="none"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/bag4.jpg" alt="끌어당기기"></div>
         <div class="step-text"><div class="step-desc">대상자가 로프를 양손으로 잡으면, 자신은 낮은 자세를 유지한 채 천천히 끌어당깁니다(끌려 들어가지 않도록 주의).</div></div>
       </div>
     </div>
@@ -528,27 +527,27 @@
     <div class="edu-section" id="edu-aed">
       <div class="step-card">
         <div class="step-num">1</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><rect x="14" y="10" width="36" height="44" rx="6" fill="none" stroke="#0B3454" stroke-width="3"/><circle cx="32" cy="20" r="5" fill="#1E8E5A"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/aed1.jpg" alt="전원 켜기"></div>
         <div class="step-text"><div class="step-title">전원 켜기</div><div class="step-desc">심폐소생술을 방해하지 않는 위치에 AED를 놓고 전원 버튼을 누릅니다. 이후 음성 안내를 따라갑니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">2</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M24 8 Q32 4 40 8 L44 16 Q46 30 42 46 Q32 52 22 46 Q18 30 20 16 Z" fill="none" stroke="#0B3454" stroke-width="3" stroke-linejoin="round"/><rect x="33" y="14" width="9" height="7" rx="1.5" fill="#FF6B35"/><rect x="21" y="30" width="9" height="7" rx="1.5" fill="#FF6B35"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/aed2.jpg" alt="패드 부착"></div>
         <div class="step-text"><div class="step-title">패드 부착 (맨 가슴에)</div><div class="step-desc">상의를 벗기고 패드 포장지 그림대로 <b>오른쪽 빗장뼈 아래</b>와 <b>왼쪽 젖꼭지 아래 옆구리 쪽</b>에 단단히 붙입니다. <b>여성도 브래지어를 벗길 필요 없이</b> 위치만 조정해 가슴 조직을 피해 부착하면 됩니다(2025년 지침).</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">3</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="30" cy="30" r="20" fill="none" stroke="#0B3454" stroke-width="3"/><path d="M18 40 Q30 30 42 40" stroke="#E4572E" stroke-width="3.5" fill="none" stroke-linecap="round"/><path d="M14 14l32 32" stroke="#E4572E" stroke-width="3.5" stroke-linecap="round"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/aed3.jpg" alt="접촉 금지"></div>
         <div class="step-text"><div class="step-title">심전도 분석 중 — 접촉 금지</div><div class="step-desc">"분석 중입니다"라는 안내가 나오면 아무도 환자 몸에 닿지 않아야 합니다. 환자가 움직이지 않게 합니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">4</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M34 6L18 34h12l-4 24 20-30H32z" fill="#FF6B35"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/aed4.jpg" alt="제세동 버튼"></div>
         <div class="step-text"><div class="step-title">필요시 제세동 (충격) 버튼</div><div class="step-desc">"제세동이 필요합니다"라는 안내가 나오면, 모두 환자에게서 떨어졌는지 확인한 뒤 깜빡이는 버튼을 누릅니다. "필요하지 않습니다"라고 안내되면 그대로 다음 단계로 넘어갑니다.</div></div>
       </div>
       <div class="step-card">
         <div class="step-num">5</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M32 10v44M22 20l10-10 10 10M22 44l10 10 10-10" stroke="#1E8E5A" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div class="step-icon"><img src="./icon/edu/aed5.jpg" alt="즉시 압박 재개"></div>
         <div class="step-text"><div class="step-title">즉시 가슴압박 재개</div><div class="step-desc">충격을 주었든 안 주었든, 곧바로 가슴압박을 다시 시작합니다. AED는 2분마다 자동으로 심전도를 다시 분석합니다. 구급대가 도착할 때까지 반복합니다.</div></div>
       </div>
       <div class="src-box">출처: 2025년 한국 심폐소생술 가이드라인 (질병관리청·대한심폐소생협회)</div>
