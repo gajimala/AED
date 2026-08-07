@@ -1005,8 +1005,26 @@ function coord2RegionName(lat, lng){
   });
 }
 
+// 좌표 하나로 "행정구역(필터용)"과 "전체 주소(화면 표시용)"를 한 번에 가져옴 — API 호출 절약
+function coord2RegionAndAddress(lat, lng){
+  return new Promise(resolve=>{
+    geocoder.coord2Address(lng, lat, (result, status)=>{
+      if(status === kakao.maps.services.Status.OK && result.length){
+        const a = result[0].address;               // 지번 주소 기준
+        const road = result[0].road_address;        // 도로명 주소(있으면 이걸 우선 사용)
+        const region = a ? `${a.region_1depth_name} ${a.region_2depth_name}` : '기타';
+        const addr = (road && road.address_name) ? road.address_name : (a ? a.address_name : '');
+        resolve({ region, addr });
+      } else {
+        resolve({ region:'기타', addr:'' });
+      }
+    });
+  });
+}
+
 async function classifyMissingRegions(){
-  const todo = loadRecords().filter(r=>!r.region);
+  // 행정구역이 없거나(필터용) 주소가 비어있는(화면표시용) 좌표를 대상으로 함 — 기존 3,647건 대부분 주소가 비어있던 것도 여기서 자동으로 채워짐
+  const todo = loadRecords().filter(r=>!r.region || !r.addr);
   if(!todo.length) return;
   const progress = document.getElementById('classifyProgress');
   progress.classList.add('show');
@@ -1015,17 +1033,19 @@ async function classifyMissingRegions(){
   for(let i=0; i<todo.length; i+=BATCH){
     const chunk = todo.slice(i, i+BATCH);
     await Promise.all(chunk.map(async rec=>{
-      rec.region = await coord2RegionName(rec.lat, rec.lng);
+      const {region, addr} = await coord2RegionAndAddress(rec.lat, rec.lng);
+      rec.region = region;
+      if(!rec.addr && addr) rec.addr = addr; // 이미 관리자가 입력해둔 주소는 덮어쓰지 않음
     }));
     // 카카오 조회는 개별로(동시에) 하되, 파이어스토어 저장은 15건을 한 번의 배치로 묶어서
     // 쓰기 요청 수와 실시간 리스너 호출 횟수를 크게 줄임(빠른 연속 재렌더링 방지)
     if(lifesaversCol){
       const fbBatch = db.batch();
-      chunk.forEach(rec=> fbBatch.update(lifesaversCol.doc(rec.id), { region: rec.region }));
-      fbBatch.commit().catch(e=>console.error('region 배치 저장 실패', e));
+      chunk.forEach(rec=> fbBatch.update(lifesaversCol.doc(rec.id), { region: rec.region, addr: rec.addr }));
+      fbBatch.commit().catch(e=>console.error('region/주소 배치 저장 실패', e));
     }
     done += chunk.length;
-    progress.textContent = `지역 분류 중… ${done}/${todo.length} (앱을 계속 써도 됩니다)`;
+    progress.textContent = `주소·행정구역 자동입력 중… ${done}/${todo.length} (앱을 계속 써도 됩니다)`;
     populateRegionSelect();
     if(document.getElementById('panel-bulkEdit')?.classList.contains('active')) buildBulkEditTable();
   }
@@ -1211,8 +1231,14 @@ function renderAedMarker(a){
 function avoidOverlapPosition(lat, lng){
   const OVERLAP_THRESHOLD_M = 5;
   const OFFSET_M = 8;
+  // 3,647건 전부와 매번 삼각함수(haversine) 계산하면 느려지므로, 명백히 먼 것들은
+  // 값싼 위경도 차이 비교로 먼저 걸러내고(약 20m 범위), 그 안에 든 것만 정밀 계산
+  const BOX_DEG = 0.0002;
   const existing = loadRecords();
-  let tooClose = existing.some(r => haversineMeters(lat, lng, r.lat, r.lng) < OVERLAP_THRESHOLD_M)
+  let tooClose = existing.some(r =>
+        Math.abs(r.lat-lat) < BOX_DEG && Math.abs(r.lng-lng) < BOX_DEG &&
+        haversineMeters(lat, lng, r.lat, r.lng) < OVERLAP_THRESHOLD_M
+      )
               || aedState.markers.some(m => {
                    const p = m.getPosition();
                    return haversineMeters(lat, lng, p.getLat(), p.getLng()) < OVERLAP_THRESHOLD_M;
