@@ -725,6 +725,11 @@ let db = null, lifesaversCol = null;
 try{
   if(typeof firebase === 'undefined') throw new Error('firebase SDK가 로드되지 않았습니다');
   db = firebase.firestore();
+  // 오프라인 캐시 켜기 — 같은 기기/브라우저로 재방문하면 로컬에 저장된 데이터를 먼저 쓰고
+  // 바뀐 것만 새로 읽어와서, 매번 3,647건 전체를 다시 읽는 걸 방지(무료 읽기 한도 절약)
+  db.enablePersistence().catch(e=>{
+    console.warn('오프라인 캐시 비활성(다른 탭이 열려있거나 브라우저 미지원):', e.code);
+  });
   lifesaversCol = db.collection('lifesavers');
 } catch(e){
   console.error('Firestore 초기화 실패 — 데이터 기능이 동작하지 않습니다:', e);
@@ -742,7 +747,7 @@ lifesaversCol.onSnapshot(async (snapshot)=>{
   snapshot.forEach(doc=> list.push({ id: doc.id, ...doc.data() }));
   _cache = list;
   if(_resolveLoaded){ _resolveLoaded(_cache); _resolveLoaded = null; }
-  if(typeof map !== 'undefined' && map && typeof clusterer !== 'undefined' && clusterer){ renderAllMarkers(); }
+  if(typeof map !== 'undefined' && map && typeof clusterer !== 'undefined' && clusterer){ debouncedRenderAllMarkers(); }
 }, (err)=>{
   console.error('Firestore 연결 실패', err);
   if(_resolveLoaded){ _cache = _cache || []; _resolveLoaded(_cache); _resolveLoaded = null; }
@@ -969,6 +974,12 @@ function startMyLocationTracking(){
   );
 }
 
+let _renderDebounceTimer = null;
+function debouncedRenderAllMarkers(){
+  clearTimeout(_renderDebounceTimer);
+  _renderDebounceTimer = setTimeout(renderAllMarkers, 400);
+}
+
 function renderAllMarkers(){
   clusterer.clear();
   markerObjs = {};
@@ -1002,12 +1013,18 @@ async function classifyMissingRegions(){
   const BATCH = 15;
   let done = 0;
   for(let i=0; i<todo.length; i+=BATCH){
-    const batch = todo.slice(i, i+BATCH);
-    await Promise.all(batch.map(async rec=>{
+    const chunk = todo.slice(i, i+BATCH);
+    await Promise.all(chunk.map(async rec=>{
       rec.region = await coord2RegionName(rec.lat, rec.lng);
-      if(lifesaversCol) lifesaversCol.doc(rec.id).update({ region: rec.region }).catch(e=>console.error('region 저장 실패', e));
     }));
-    done += batch.length;
+    // 카카오 조회는 개별로(동시에) 하되, 파이어스토어 저장은 15건을 한 번의 배치로 묶어서
+    // 쓰기 요청 수와 실시간 리스너 호출 횟수를 크게 줄임(빠른 연속 재렌더링 방지)
+    if(lifesaversCol){
+      const fbBatch = db.batch();
+      chunk.forEach(rec=> fbBatch.update(lifesaversCol.doc(rec.id), { region: rec.region }));
+      fbBatch.commit().catch(e=>console.error('region 배치 저장 실패', e));
+    }
+    done += chunk.length;
     progress.textContent = `지역 분류 중… ${done}/${todo.length} (앱을 계속 써도 됩니다)`;
     populateRegionSelect();
     if(document.getElementById('panel-bulkEdit')?.classList.contains('active')) buildBulkEditTable();
