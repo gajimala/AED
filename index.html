@@ -733,12 +733,11 @@ try{
 if(lifesaversCol){
 // Firestore 실시간 리스너 — 어디서든(다른 기기 포함) 데이터가 바뀌면 자동으로 _cache 갱신 + 지도 재표시
 lifesaversCol.onSnapshot(async (snapshot)=>{
-  if(_firstSnapshot && snapshot.empty){
+  if(_firstSnapshot){
     _firstSnapshot = false;
-    await seedFromJson();
-    return; // 시딩 후 onSnapshot이 다시 호출되므로 여기서 종료
+    const done = await resumeSeedIfNeeded(snapshot.size);
+    if(done) return; // 시딩(또는 이어서 채우기)이 실행됐으면 onSnapshot이 다시 호출되므로 여기서 종료
   }
-  _firstSnapshot = false;
   const list = [];
   snapshot.forEach(doc=> list.push({ id: doc.id, ...doc.data() }));
   _cache = list;
@@ -754,12 +753,31 @@ lifesaversCol.onSnapshot(async (snapshot)=>{
   if(_resolveLoaded){ _resolveLoaded(_cache); _resolveLoaded = null; }
 }
 
-// 파이어스토어가 비어있을 때(최초 1회) lifesavers.json으로 시딩
-async function seedFromJson(){
+// 현재 문서 수가 lifesavers.json 건수보다 적으면(최초 시딩이 중간에 끊긴 경우 포함) 부족한 만큼 이어서 채워 넣음.
+// 이미 있는 문서는 같은 id로 덮어써도 내용이 같아 무해함 — 안전하게 몇 번을 다시 실행해도 됨.
+async function resumeSeedIfNeeded(currentSize){
   try{
     const res = await fetch(SEED_JSON_URL);
     if(!res.ok) throw new Error('HTTP '+res.status);
-    const raw = await res.json(); // [{lat,lng}, ...]
+    const raw = await res.json();
+    if(currentSize >= raw.length) return false; // 이미 다 채워져 있음
+    console.warn(`시딩이 ${currentSize}/${raw.length}건만 된 상태 — 나머지를 이어서 채웁니다`);
+    await seedFromJson(raw);
+    return true;
+  }catch(e){
+    console.error('시딩 상태 확인 실패', e);
+    return false;
+  }
+}
+
+// lifesavers.json 전체를 파이어스토어에 채워 넣음(이미 있는 id는 덮어쓰기라 안전, 중간에 끊겨도 재실행하면 이어짐)
+async function seedFromJson(preloaded){
+  try{
+    const raw = preloaded || await (async ()=>{
+      const res = await fetch(SEED_JSON_URL);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res.json();
+    })();
     let batch = db.batch();
     let count = 0;
     for(let i=0;i<raw.length;i++){
