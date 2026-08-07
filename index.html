@@ -1236,7 +1236,10 @@ function buildMarker(rec){
   kakao.maps.event.addListener(marker, 'click', ()=>openMarkerSheet(rec.id));
   kakao.maps.event.addListener(marker, 'dragend', ()=>{
     const p = marker.getPosition();
-    upsertRecord({...markerObjs[rec.id].record, lat:p.getLat(), lng:p.getLng(), region: undefined});
+    const before = markerObjs[rec.id].record;
+    const oldLat = before.lat, oldLng = before.lng;
+    upsertRecord({...before, lat:p.getLat(), lng:p.getLng(), region: undefined});
+    logAdminChange('edit', rec.id, before.addr, oldLat, oldLng, p.getLat(), p.getLng(), '관리자 아이콘 드래그 이동');
     markerObjs[rec.id].record.lat = p.getLat();
     markerObjs[rec.id].record.lng = p.getLng();
     markerObjs[rec.id].record.region = undefined;
@@ -1292,10 +1295,41 @@ function haversineMeters(lat1, lon1, lat2, lon2){
   return 2*R*Math.asin(Math.sqrt(a));
 }
 
-function loadRequests(){
-  try{ return JSON.parse(localStorage.getItem(REQUESTS_KEY)) || []; }catch(e){ return []; }
+let _reqCache = [];
+const changelogCol = lifesaversCol ? db.collection('changelog') : null;
+if(changelogCol){
+  changelogCol.onSnapshot((snapshot)=>{
+    const list = [];
+    snapshot.forEach(doc=> list.push({ id: doc.id, ...doc.data() }));
+    _reqCache = list;
+    // 지금 관리자가 수정요청/변경이력 탭을 보고 있으면 화면도 같이 갱신
+    if(document.getElementById('panel-requests')?.classList.contains('active')) doRenderRequestsList();
+    if(document.getElementById('panel-history')?.classList.contains('active')) doRenderHistoryList();
+    if(typeof refreshRequestBadge==='function') refreshRequestBadge();
+  }, (err)=>console.error('변경이력 연결 실패', err));
 }
-function saveRequests(list){ localStorage.setItem(REQUESTS_KEY, JSON.stringify(list)); }
+function loadRequests(){ return _reqCache || []; }
+// 요청/이력 항목 하나를 저장(신규 생성 또는 일부 필드만 갱신). 전체 목록을 다시 쓰지 않고 그 문서 하나만 씀.
+function upsertRequestEntry(entry){
+  const list = loadRequests();
+  const i = list.findIndex(r=>r.id===entry.id);
+  if(i>-1) list[i] = {...list[i], ...entry}; else list.push(entry);
+  _reqCache = list;
+  if(changelogCol){
+    const {id, ...data} = entry;
+    changelogCol.doc(entry.id).set(data, {merge:true}).catch(e=>console.error('이력 저장 실패', e));
+  }
+}
+// 관리자가 화면에서 직접 신규/수정/삭제할 때도 이력에 자동 기록(승인 절차 없이 바로 approved 상태로)
+function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, reason){
+  upsertRequestEntry({
+    id: newId(), type, targetId,
+    addr: addr||'', oldLat: oldLat??null, oldLng: oldLng??null, newLat: newLat??null, newLng: newLng??null,
+    reason: reason || '관리자 직접 작업', source:'admin',
+    photoDataUrl: null, photoGPS: null, distance: null,
+    submittedAt: Date.now(), resolvedAt: Date.now(), status: 'approved'
+  });
+}
 
 const REPORT_COPY = {
   edit: {
@@ -1512,9 +1546,8 @@ function submitReport(){
   }
 
   // 자동승인이든 대기든 무조건 이력에 남김 — 관리자가 전체 변경이력을 확인할 수 있게
-  const reqs = loadRequests();
-  reqs.push(entry);
-  saveRequests(reqs);
+  entry.source = 'civilian';
+  upsertRequestEntry(entry);
   refreshRequestBadge();
 
   setTimeout(()=>{ closeReportFlow(); }, 1600);
@@ -1800,8 +1833,10 @@ function saveEditCoord(){
     const m=document.getElementById('markerMsg'); m.textContent='위도/경도를 숫자로 입력하세요.'; m.className='msg err'; m.style.display='block';
     return;
   }
-  const rec = {...markerObjs[currentMarkerId].record, lat, lng, addr, region: undefined};
+  const before = markerObjs[currentMarkerId].record;
+  const rec = {...before, lat, lng, addr, region: undefined};
   upsertRecord(rec);
+  logAdminChange('edit', rec.id, addr||before.addr, before.lat, before.lng, lat, lng, '관리자 좌표 직접수정');
   markerObjs[currentMarkerId].record = rec;
   markerObjs[currentMarkerId].marker.setPosition(new kakao.maps.LatLng(lat,lng));
   clusterer.redraw();
@@ -1832,8 +1867,10 @@ function deleteMarker(){
   if(!isAdmin) return;
   if(!confirm('이 구조함을 삭제할까요? 되돌릴 수 없습니다.')) return;
   const id = currentMarkerId;
+  const rec = markerObjs[id].record;
   clusterer.removeMarker(markerObjs[id].marker);
   deleteRecord(id);
+  logAdminChange('delete', id, rec.addr, rec.lat, rec.lng, null, null, '관리자 직접 삭제');
   delete markerObjs[id];
   closeMarkerSheet();
 }
@@ -1983,20 +2020,26 @@ const STATUS_COLOR = {
 };
 
 function renderReqCard(r, actionable){
-  const dist = r.distance!=null ? `${Math.round(r.distance)}m 차이` : '위치정보 없음';
-  const gpsLine = r.photoGPS ? `사진 GPS: ${r.photoGPS.lat.toFixed(6)}, ${r.photoGPS.lng.toFixed(6)}` : '사진에 위치정보 없음';
+  const dist = r.distance!=null ? `${Math.round(r.distance)}m 차이` : '';
+  const gpsLine = r.photoGPS ? `사진 GPS: ${r.photoGPS.lat.toFixed(6)}, ${r.photoGPS.lng.toFixed(6)}` : (r.source==='admin' ? '' : '사진에 위치정보 없음');
+  const fmt = (v)=> (v==null || isNaN(v)) ? '—' : Number(v).toFixed(6);
   const coordLine = r.type==='add'
-    ? `<b>제안 좌표</b>: ${r.newLat.toFixed(6)}, ${r.newLng.toFixed(6)}`
-    : `<b>기존 좌표</b>: ${(r.oldLat??0).toFixed(6)}, ${(r.oldLng??0).toFixed(6)}<br><b>제안/확인 좌표</b>: ${r.newLat.toFixed(6)}, ${r.newLng.toFixed(6)}`;
+    ? `<b>제안 좌표</b>: ${fmt(r.newLat)}, ${fmt(r.newLng)}`
+    : r.type==='delete'
+      ? `<b>삭제된 좌표</b>: ${fmt(r.oldLat)}, ${fmt(r.oldLng)}`
+      : `<b>기존 좌표</b>: ${fmt(r.oldLat)}, ${fmt(r.oldLng)}<br><b>변경 좌표</b>: ${fmt(r.newLat)}, ${fmt(r.newLng)}`;
+  const sourceBadge = r.source==='admin'
+    ? `<span style="color:var(--navy);font-weight:700;">🛡 관리자 직접</span>`
+    : `<span style="color:var(--orange);font-weight:700;">👤 민간인 제보</span>`;
   return `
     <div class="req-card">
-      <img src="${r.photoDataUrl}">
+      ${r.photoDataUrl ? `<img src="${r.photoDataUrl}">` : ''}
       <div class="req-meta">
-        <b>${TYPE_LABEL[r.type]||r.type}</b> · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
+        <b>${TYPE_LABEL[r.type]||r.type}</b> · ${sourceBadge} · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
         <b>대상</b>: ${r.addr || '(주소 미입력)'} ${r.region ? `· ${r.region}` : ''}<br>
         ${coordLine}<br>
         <b>사유</b>: ${(r.reason||'').replace(/</g,'&lt;')}<br>
-        <b>${gpsLine}</b> · ${dist}<br>
+        ${gpsLine || dist ? `<b>${gpsLine}</b> ${gpsLine && dist ? '· ' : ''}${dist}<br>` : ''}
         접수: ${new Date(r.submittedAt).toLocaleString('ko-KR')}
         ${r.resolvedAt ? `<br>처리: ${new Date(r.resolvedAt).toLocaleString('ko-KR')}` : ''}
       </div>
@@ -2011,13 +2054,12 @@ function renderReqCard(r, actionable){
 // 요청/이력 항목의 좌표를 행정구역으로 분류(연월·행정구역 필터에 쓰임). 최초 1회만 계산되고 캐시됨.
 async function classifyRequestRegions(){
   if(!geocoder) return; // 카카오 로드 전이면 나중에 다시 호출됨(각 render 함수에서 매번 시도)
-  const list = loadRequests();
-  const todo = list.filter(r=>!r.region);
+  const todo = loadRequests().filter(r=>!r.region && (r.newLat!=null && r.newLng!=null));
   if(!todo.length) return;
   for(const r of todo){
-    r.region = await coord2RegionName(r.newLat, r.newLng);
+    const region = await coord2RegionName(r.newLat, r.newLng);
+    upsertRequestEntry({ id: r.id, region });
   }
-  saveRequests(list);
 }
 
 function monthOf(ts){
@@ -2110,24 +2152,18 @@ function doRenderHistoryList(){
 
 
 function approveRequest(id){
-  const list = loadRequests();
-  const req = list.find(r=>r.id===id);
+  const req = loadRequests().find(r=>r.id===id);
   if(!req) return;
   applyApprovedChange(req);
-  req.status = 'approved';
-  req.resolvedAt = Date.now();
-  saveRequests(list);
+  upsertRequestEntry({ id, status:'approved', resolvedAt: Date.now(), targetId: req.targetId });
   renderRequestsList();
   buildBulkEditTable();
 }
 
 function rejectRequest(id){
-  const list = loadRequests();
-  const req = list.find(r=>r.id===id);
+  const req = loadRequests().find(r=>r.id===id);
   if(!req) return;
-  req.status = 'rejected';
-  req.resolvedAt = Date.now();
-  saveRequests(list);
+  upsertRequestEntry({ id, status:'rejected', resolvedAt: Date.now() });
   renderRequestsList();
 }
 
@@ -2143,6 +2179,7 @@ function addSingle(){
   }
   const rec = {id:newId(), lat, lng, addr, note};
   upsertRecord(rec);
+  logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력');
   addMarkerToMap(rec);
   classifyMissingRegions();
   msg.textContent='등록되었습니다. 지도에 즉시 반영됩니다.'; msg.className='msg ok'; msg.style.display='block';
@@ -2186,6 +2223,7 @@ function parseBulkNew(){
   document.getElementById('confirmBulkBtn').onclick = ()=>{
     parsed.forEach(rec=>{ upsertRecord(rec); addMarkerToMap(rec); });
     classifyMissingRegions();
+    if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(붙여넣기) — ${parsed.length}건 등록`);
     msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
     document.getElementById('bulkNewArea').value='';
     preview.innerHTML='';
@@ -2267,6 +2305,7 @@ function parseBulkNewExcel(evt){
     document.getElementById('confirmExcelBtn').onclick = ()=>{
       parsed.forEach(rec=>{ upsertRecord(rec); addMarkerToMap(rec); });
       classifyMissingRegions();
+      if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(엑셀) — ${parsed.length}건 등록`);
       msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`;
       preview.innerHTML=''; evt.target.value='';
       buildBulkEditTable();
@@ -2350,6 +2389,10 @@ function importBulkEditExcel(evt){
     }
     clusterer.redraw();
     if(added>0) classifyMissingRegions();
+    if(added+updated+deleted>0){
+      logAdminChange('edit', null, `신규${added}·수정${updated}·삭제${deleted}`, null, null, null, null,
+        `관리자 통합엑셀(구분열) 업로드 — 신규 ${added}건, 수정 ${updated}건, 삭제 ${deleted}건`);
+    }
     msg.textContent = `신규 ${added}건 · 수정 ${updated}건 · 삭제 ${deleted}건 반영 완료`
       + (notFound? ` · id 불일치(삭제 대상 못 찾음) ${notFound}건`:'')
       + (badCoord? ` · 좌표 오류로 제외 ${badCoord}건`:'');
@@ -2463,7 +2506,9 @@ function renderMoreBulkRows(){
 
 function quickDelete(id){
   if(!confirm('이 구조함을 삭제할까요?')) return;
+  const rec = markerObjs[id]?.record || loadRecords().find(r=>r.id===id) || {};
   deleteRecord(id);
+  logAdminChange('delete', id, rec.addr, rec.lat, rec.lng, null, null, '관리자 대량수정에서 삭제');
   if(markerObjs[id]){ clusterer.removeMarker(markerObjs[id].marker); delete markerObjs[id]; }
   buildBulkEditTable();
 }
@@ -2489,7 +2534,10 @@ function saveBulkEdit(){
     updated++;
   });
   clusterer.redraw();
-  if(updated>0) classifyMissingRegions();
+  if(updated>0){
+    classifyMissingRegions();
+    logAdminChange('edit', null, `${updated}건`, null, null, null, null, `관리자 대량수정(표에서 직접 저장) — ${updated}건 변경`);
+  }
   alert(`${updated}건 저장 완료${errors? `, ${errors}건은 좌표 오류로 건너뜀`:''}`);
 }
 </script>
