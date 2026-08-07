@@ -1,0 +1,41 @@
+name: Sync Firestore to lifesavers.json
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # 5분마다 실행 시도(깃허브 사정에 따라 실제로는 조금 밀릴 수 있음)
+  workflow_dispatch:         # Actions 탭에서 수동으로도 즉시 실행 가능
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-json
+  cancel-in-progress: false   # 이전 동기화가 끝나기 전에 겹쳐 실행되지 않게
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install firebase-admin
+        run: npm install firebase-admin
+
+      - name: Run sync script (증분 동기화)
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/sync-firestore-to-json.js
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lifesavers.json lifesavers_full.json .sync-state.json
+          git diff --staged --quiet || git commit -m "자동 동기화: Firestore → lifesavers.json"
+          git push
