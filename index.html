@@ -12,6 +12,22 @@
 -->
 <script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=d02572eca2dd38bbbbb6692254d51bb7&autoload=false&libraries=services,clusterer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBKyF46dlvgE5mG3VLhCHto4fdCpSYXETA",
+    authDomain: "ls-aed-6b2c5.firebaseapp.com",
+    projectId: "ls-aed-6b2c5",
+    storageBucket: "ls-aed-6b2c5.firebasestorage.app",
+    messagingSenderId: "535805485726",
+    appId: "1:535805485726:web:4c99c18634a96a78a2518f"
+  };
+  try{
+    if(typeof firebase !== 'undefined') firebase.initializeApp(firebaseConfig);
+    else console.error('Firebase SDK 로드 실패 — 네트워크 또는 CDN 차단일 수 있음');
+  }catch(e){ console.error('Firebase 초기화 실패', e); }
+</script>
 
 <style>
   :root{
@@ -79,6 +95,11 @@
     font-size:13px;line-height:1.6;
   }
   #aedInfoBox.show{display:block;}
+  #aedInfoClose{
+    position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:50%;
+    background:var(--bg);border:none;color:var(--ink-soft);font-size:14px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+  }
   #addReportEntry{
     position:fixed;right:62px;bottom:22px;z-index:500;
     background:var(--orange);color:#fff;border:none;border-radius:24px;
@@ -626,9 +647,14 @@
       <div class="card">
         <div class="hint">전체 <b id="totalCount">0</b>건 중 <b>검색으로 좁혀서</b> 편집하는 걸 권장합니다(한 번에 너무 많이 그리면 느려질 수 있음). 셀을 직접 눌러 값을 고친 뒤 아래 <b>보이는 항목 저장</b>을 눌러야 반영됩니다. 🗑 로 개별 삭제.</div>
         <input type="text" id="bulkEditSearch" placeholder="주소로 검색 (예: 안인진리)" oninput="onBulkSearch()">
-        <select id="bulkEditRegionFilter" onchange="onBulkSearch()" style="margin-top:8px;width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;background:#FBFDFE;">
-          <option value="all">행정구역: 전체</option>
-        </select>
+        <div class="row" style="margin-top:8px;gap:8px;">
+          <select id="bulkSidoFilter" onchange="onBulkSidoChange()" style="flex:1;padding:11px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+            <option value="all">도/광역시: 전체</option>
+          </select>
+          <select id="bulkSigunguFilter" onchange="onBulkSearch()" style="flex:1;padding:11px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+            <option value="all">시/군/구: 전체</option>
+          </select>
+        </div>
         <div style="overflow-x:auto;margin-top:10px;">
           <table class="bulk" id="bulkEditTable">
             <thead><tr><th>주소</th><th>위도</th><th>경도</th><th>비고</th><th></th></tr></thead>
@@ -644,7 +670,18 @@
     <div class="panel" id="panel-requests">
       <div class="card">
         <div class="hint">일반 사용자가 보낸 <b>수정/신규제보/삭제신고</b>입니다. 사진·사유·제안 위치를 확인하고 승인/반려하세요. <b>자동승인된 건은 여기 안 뜨고 이미 반영된 상태</b>이며 변경이력 탭에서 확인 가능합니다.</div>
-        <div id="requestsList"></div>
+        <div class="row" style="gap:8px;">
+          <select id="reqMonthFilter" onchange="renderRequestsList()" style="flex:1;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+            <option value="all">연월: 전체</option>
+          </select>
+          <select id="reqSidoFilter" onchange="onReqSidoChange()" style="flex:1;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+            <option value="all">도/광역시: 전체</option>
+          </select>
+        </div>
+        <select id="reqSigunguFilter" onchange="renderRequestsList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+          <option value="all">시/군/구: 전체</option>
+        </select>
+        <div id="requestsList" style="margin-top:12px;"></div>
       </div>
     </div>
 
@@ -652,6 +689,17 @@
       <div class="card">
         <div class="hint">민간인이 제출한 <b>모든</b> 수정/신규/삭제 건의 전체 기록입니다(자동승인·관리자승인·반려 포함). 사유와 사진이 함께 보관됩니다.</div>
         <input type="text" id="historySearch" placeholder="주소 또는 사유로 검색" oninput="renderHistoryList()">
+        <div class="row" style="gap:8px;margin-top:8px;">
+          <select id="histMonthFilter" onchange="renderHistoryList()" style="flex:1;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+            <option value="all">연월: 전체</option>
+          </select>
+          <select id="histSidoFilter" onchange="onHistSidoChange()" style="flex:1;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+            <option value="all">도/광역시: 전체</option>
+          </select>
+        </div>
+        <select id="histSigunguFilter" onchange="renderHistoryList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+          <option value="all">시/군/구: 전체</option>
+        </select>
         <div style="font-size:12px;color:var(--ink-soft);margin:8px 0;">전체 <b id="historyCount">0</b>건</div>
         <div id="historyList"></div>
       </div>
@@ -662,53 +710,92 @@
 
 <script>
 /* =========================================================
-   데이터 계층 (지금은 localStorage / 추후 Firestore로 교체)
-   레코드 구조: {id, lat, lng, addr, note, updatedAt}
+   데이터 계층 — Firebase Firestore 실시간 동기화
+   레코드 구조: {id, lat, lng, addr, note, region, updatedAt}
    ========================================================= */
-const STORAGE_KEY = 'gujohham_records_v1';
 const ADMIN_CODE = '22222';
-
-function loadRecords(){
-  // ensureLoaded() 완료 이후에만 최신값을 반환하는 동기 접근용 헬퍼
-  return _cache || [];
-}
+const SEED_JSON_URL = './lifesavers.json'; // 파이어스토어가 비어있을 때 최초 1회만 씀
 
 let _cache = null;
-const SEED_JSON_URL = './lifesavers.json'; // 원본 좌표는 별도 파일 — 이 파일과 같은 폴더에 둘 것
+let _resolveLoaded = null;
+const _loadedPromise = new Promise(res=>{ _resolveLoaded = res; });
+let _firstSnapshot = true;
 
-async function ensureLoaded(){
-  if(_cache) return _cache;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if(raw){ _cache = JSON.parse(raw); return _cache; }
-  // localStorage가 비어있을 때(최초 실행) lifesavers.json에서 1회 불러와 시드로 사용
+let db = null, lifesaversCol = null;
+try{
+  if(typeof firebase === 'undefined') throw new Error('firebase SDK가 로드되지 않았습니다');
+  db = firebase.firestore();
+  lifesaversCol = db.collection('lifesavers');
+} catch(e){
+  console.error('Firestore 초기화 실패 — 데이터 기능이 동작하지 않습니다:', e);
+}
+
+if(lifesaversCol){
+// Firestore 실시간 리스너 — 어디서든(다른 기기 포함) 데이터가 바뀌면 자동으로 _cache 갱신 + 지도 재표시
+lifesaversCol.onSnapshot(async (snapshot)=>{
+  if(_firstSnapshot && snapshot.empty){
+    _firstSnapshot = false;
+    await seedFromJson();
+    return; // 시딩 후 onSnapshot이 다시 호출되므로 여기서 종료
+  }
+  _firstSnapshot = false;
+  const list = [];
+  snapshot.forEach(doc=> list.push({ id: doc.id, ...doc.data() }));
+  _cache = list;
+  if(_resolveLoaded){ _resolveLoaded(_cache); _resolveLoaded = null; }
+  if(typeof map !== 'undefined' && map && typeof clusterer !== 'undefined' && clusterer){ renderAllMarkers(); }
+}, (err)=>{
+  console.error('Firestore 연결 실패', err);
+  if(_resolveLoaded){ _cache = _cache || []; _resolveLoaded(_cache); _resolveLoaded = null; }
+});
+} else {
+  // Firestore를 아예 못 쓰는 상태(SDK 로드 실패 등) — 앱이 멈추지 않도록 빈 목록으로 대체
+  _cache = [];
+  if(_resolveLoaded){ _resolveLoaded(_cache); _resolveLoaded = null; }
+}
+
+// 파이어스토어가 비어있을 때(최초 1회) lifesavers.json으로 시딩
+async function seedFromJson(){
   try{
     const res = await fetch(SEED_JSON_URL);
     if(!res.ok) throw new Error('HTTP '+res.status);
-    const raw2 = await res.json(); // [{lat,lng}, ...] 원본 형식 그대로
-    const seed = raw2.map((r,i)=>({
-      id:'ls'+(i+1), lat:r.lat, lng:r.lng,
-      addr:r.addr||'', note:r.note||'', updatedAt:Date.now()
-    }));
-    _cache = seed;
-    saveRecords(seed);
+    const raw = await res.json(); // [{lat,lng}, ...]
+    let batch = db.batch();
+    let count = 0;
+    for(let i=0;i<raw.length;i++){
+      const r = raw[i];
+      const id = 'ls'+(i+1);
+      const docRef = lifesaversCol.doc(id);
+      batch.set(docRef, { lat:r.lat, lng:r.lng, addr:r.addr||'', note:r.note||'', updatedAt: Date.now() });
+      count++;
+      if(count % 450 === 0){ await batch.commit(); batch = db.batch(); }
+    }
+    await batch.commit();
+    console.log('초기 데이터 시딩 완료:', raw.length, '건');
   }catch(e){
-    console.error('lifesavers.json 로드 실패 — 파일 경로/로컬서버 여부를 확인하세요', e);
-    _cache = [];
+    console.error('초기 시딩 실패', e);
   }
-  return _cache;
 }
 
-function saveRecords(list){ _cache = list; localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }
+async function ensureLoaded(){ return _loadedPromise; }
+function loadRecords(){ return _cache || []; }
+
+// 화면 반응은 즉시(낙관적 갱신), 실제 저장은 Firestore로 — 다른 사용자에게는 onSnapshot으로 곧 반영됨
 function upsertRecord(rec){
+  rec.updatedAt = Date.now();
   const list = loadRecords();
   const i = list.findIndex(r=>r.id===rec.id);
-  rec.updatedAt = Date.now();
   if(i>-1) list[i] = {...list[i], ...rec}; else list.push(rec);
-  saveRecords(list);
+  _cache = list;
+  if(lifesaversCol){
+    const {id, ...data} = rec;
+    lifesaversCol.doc(rec.id).set(data, {merge:true}).catch(e=>console.error('Firestore 저장 실패', e));
+  }
   return list;
 }
 function deleteRecord(id){
-  saveRecords(loadRecords().filter(r=>r.id!==id));
+  _cache = loadRecords().filter(r=>r.id!==id);
+  if(lifesaversCol) lifesaversCol.doc(id).delete().catch(e=>console.error('Firestore 삭제 실패', e));
 }
 function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
 
@@ -803,6 +890,11 @@ async function initMap(){
   populateRegionSelect();
   classifyMissingRegions();       // 아직 행정구역이 안 붙은 좌표만 백그라운드로 분류(최초 1회, 이후 캐시됨)
 
+  // AED는 기본적으로 항상 켜진 상태로 시작 — 버튼은 이제 껐다 켜는 토글 용도
+  aedState.on = true;
+  document.getElementById('aedToggleBtn').classList.add('on');
+  loadAedForCurrentRegion();
+
   // 처음엔 내 GPS 위치를 중심으로 — 이후엔 지도를 강제로 다시 옮기지 않음(사용자가 팬/줌하면 그대로 둠)
   centerMapOnMyLocationOnce();
   startMyLocationTracking();
@@ -895,16 +987,16 @@ async function classifyMissingRegions(){
     const batch = todo.slice(i, i+BATCH);
     await Promise.all(batch.map(async rec=>{
       rec.region = await coord2RegionName(rec.lat, rec.lng);
+      if(lifesaversCol) lifesaversCol.doc(rec.id).update({ region: rec.region }).catch(e=>console.error('region 저장 실패', e));
     }));
     done += batch.length;
     progress.textContent = `지역 분류 중… ${done}/${todo.length} (앱을 계속 써도 됩니다)`;
-    saveRecords(loadRecords());   // 중간에 앱을 꺼도 이어서 하도록 주기적으로 저장
     populateRegionSelect();
-    populateBulkRegionFilter(loadRecords());   // 관리자가 대량수정 탭을 보고 있으면 건수 실시간 갱신
+    if(document.getElementById('panel-bulkEdit')?.classList.contains('active')) buildBulkEditTable();
   }
   progress.classList.remove('show');
   populateRegionSelect();
-  populateBulkRegionFilter(loadRecords());
+  if(document.getElementById('panel-bulkEdit')?.classList.contains('active')) buildBulkEditTable();
 }
 
 function populateRegionSelect(){
@@ -956,23 +1048,26 @@ function clearAedMarkers(){
 }
 
 async function loadAedForCurrentRegion(){
-  const box = document.getElementById('aedInfoBox');
   if(!map){
-    box.classList.add('show');
-    box.innerHTML = '⚠️ 지도가 아직 준비되지 않았습니다. 화면 위쪽에 지도 로딩 에러 배너가 떠 있는지 확인해주세요 (카카오 앱키/도메인 등록 문제일 수 있어요).';
+    setAedInfoMsg('⚠️ 지도가 아직 준비되지 않았습니다. 화면 위쪽에 지도 로딩 에러 배너가 떠 있는지 확인해주세요 (카카오 앱키/도메인 등록 문제일 수 있어요).');
     return;
   }
-  box.classList.add('show');
-  box.innerHTML = '📡 이 지역 AED 정보를 불러오는 중…';
+  setAedInfoMsg('📡 이 지역 AED 정보를 불러오는 중…');
   // 지도 중심 좌표를 카카오 좌표→행정구역 API로 시도/시군구 이름을 얻어서 AED 조회에 사용
   const center = map.getCenter();
   const regionName = await coord2RegionName(center.getLat(), center.getLng());
   if(!regionName || regionName==='기타'){
-    box.innerHTML = '⚠️ 현재 지도 위치의 행정구역을 확인하지 못했습니다. 지도를 조금 이동한 뒤 다시 시도해주세요.';
+    setAedInfoMsg('⚠️ 현재 지도 위치의 행정구역을 확인하지 못했습니다. 지도를 조금 이동한 뒤 다시 시도해주세요.');
     return;
   }
   const [sido, sigungu] = regionName.split(' ');
   fetchAed(sido, sigungu);
+}
+
+function setAedInfoMsg(html){
+  const box = document.getElementById('aedInfoBox');
+  box.classList.add('show');
+  box.innerHTML = `<button id="aedInfoClose" onclick="closeAedInfo()">✕</button><div style="padding-right:20px;">${html}</div>`;
 }
 
 async function fetchAed(sido, sigungu){
@@ -987,17 +1082,15 @@ async function fetchAed(sido, sigungu){
     const text = await res.text();
     const items = parseAedXml(text);
     if(!items.length){
-      document.getElementById('aedInfoBox').classList.add('show');
-      document.getElementById('aedInfoBox').innerHTML = `<b>${sido} ${sigungu}</b> 지역에서 AED 데이터를 찾지 못했습니다.`;
+      setAedInfoMsg(`<b>${sido} ${sigungu}</b> 지역에서 AED 데이터를 찾지 못했습니다.`);
       return;
     }
+    closeAedInfo(); // 마커가 여러 개 뜨는 정상 케이스면 안내 박스는 닫아서 지도를 가리지 않게 함
     items.forEach(item=>renderAedMarker(item));
   }catch(e){
     console.error('AED 조회 실패', e);
     // CORS 차단이면 브라우저 콘솔에 "has been blocked by CORS policy" 메시지가 뜸 — 그 경우 프록시 필요
-    document.getElementById('aedInfoBox').classList.add('show');
-    document.getElementById('aedInfoBox').innerHTML =
-      `AED 정보를 불러오지 못했습니다. (원인: 앱키 미설정, 또는 이 API가 브라우저 직접호출을 막는 CORS 정책일 수 있음)`;
+    setAedInfoMsg('AED 정보를 불러오지 못했습니다. (원인: 앱키 미설정, 또는 이 API가 브라우저 직접호출을 막는 CORS 정책일 수 있음)');
   }
 }
 
@@ -1100,12 +1193,16 @@ function showAedInfo(a){
   const badgeColor = status.available===true ? '#1E8E5A' : status.available===false ? 'var(--danger)' : 'var(--ink-soft)';
   const box = document.getElementById('aedInfoBox');
   box.innerHTML = `
-    <div style="font-weight:700;margin-bottom:4px;">🚑 ${a.name}</div>
+    <button id="aedInfoClose" onclick="closeAedInfo()">✕</button>
+    <div style="font-weight:700;margin-bottom:4px;padding-right:20px;">🚑 ${a.name}</div>
     <div style="color:var(--ink-soft);margin-bottom:6px;">${a.address}${a.place ? ' · '+a.place : ''}</div>
     <div style="color:${badgeColor};font-weight:700;margin-bottom:10px;">${status.label}</div>
     <button class="btn btn-primary btn-sm" onclick="openAedDirections(${a.lat},${a.lng},'${(a.name||'AED').replace(/'/g,"")}')">🚗 이 AED로 길찾기</button>
   `;
   box.classList.add('show');
+}
+function closeAedInfo(){
+  document.getElementById('aedInfoBox').classList.remove('show');
 }
 
 function openAedDirections(lat, lng, name){
@@ -1550,6 +1647,34 @@ function beepTone(freq, durationSec, gainLevel){
   osc.stop(metroCtx.currentTime + durationSec + 0.01);
 }
 
+// 실제 "후~" 하는 숨소리처럼 들리도록 화이트노이즈 + 필터로 합성 (단순 삐- 소리 대신)
+function playBreathSound(){
+  const dur = 1.1; // 들숨~날숨 한 번 분량
+  const bufferSize = metroCtx.sampleRate * dur;
+  const buffer = metroCtx.createBuffer(1, bufferSize, metroCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i=0;i<bufferSize;i++){ data[i] = Math.random()*2-1; } // 화이트노이즈
+
+  const noise = metroCtx.createBufferSource();
+  noise.buffer = buffer;
+
+  // 대역통과 필터로 "쉬익~" 하는 숨소리 톤을 만들고, 주파수를 살짝 낮춰가며 날숨 느낌을 냄
+  const filter = metroCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.Q.value = 0.7;
+  filter.frequency.setValueAtTime(700, metroCtx.currentTime);
+  filter.frequency.linearRampToValueAtTime(300, metroCtx.currentTime + dur);
+
+  const gain = metroCtx.createGain();
+  gain.gain.setValueAtTime(0.0001, metroCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.5, metroCtx.currentTime + dur*0.35);   // 들숨(점점 커짐)
+  gain.gain.exponentialRampToValueAtTime(0.0001, metroCtx.currentTime + dur);     // 날숨(점점 작아짐)
+
+  noise.connect(filter).connect(gain).connect(metroCtx.destination);
+  noise.start();
+  noise.stop(metroCtx.currentTime + dur + 0.05);
+}
+
 function runCompressionBeat(){
   if(!metroOn) return;
   const intervalMs = 60000 / METRO_BPM;
@@ -1581,16 +1706,16 @@ function runBreathCue(){
       speechSynthesis.speak(utter);
     }catch(e){ /* 음성 실패해도 아래 톤으로 대체됨 */ }
   }
-  // 저음 톤 2번(각 1초 간격)으로 "숨 불어넣기" 타이밍을 시각/청각으로 같이 안내
-  beepTone(440, 0.35, 0.3);
-  setTimeout(()=>{ if(metroOn) beepTone(440, 0.35, 0.3); }, 1300);
+  // 실제 숨소리 2번, 한 번당 3초 간격(0초, 3초 지점)으로 배치
+  playBreathSound();
+  setTimeout(()=>{ if(metroOn) playBreathSound(); }, 3000);
 
-  // 실제 인공호흡 2회에 걸리는 시간(약 4초) 뒤 다시 압박 30회로 복귀
+  // 인공호흡 2회(1회당 3초, 총 6초) 뒤 다시 압박 30회로 복귀
   setTimeout(()=>{
     if(!metroOn) return;
     metroCompressionCount = 0;
     runCompressionBeat();
-  }, 4000);
+  }, 6000);
 }
 
 function stopMetronome(){
@@ -1850,7 +1975,7 @@ function renderReqCard(r, actionable){
       <img src="${r.photoDataUrl}">
       <div class="req-meta">
         <b>${TYPE_LABEL[r.type]||r.type}</b> · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
-        <b>대상</b>: ${r.addr || '(주소 미입력)'}<br>
+        <b>대상</b>: ${r.addr || '(주소 미입력)'} ${r.region ? `· ${r.region}` : ''}<br>
         ${coordLine}<br>
         <b>사유</b>: ${(r.reason||'').replace(/</g,'&lt;')}<br>
         <b>${gpsLine}</b> · ${dist}<br>
@@ -1865,24 +1990,106 @@ function renderReqCard(r, actionable){
     </div>`;
 }
 
+// 요청/이력 항목의 좌표를 행정구역으로 분류(연월·행정구역 필터에 쓰임). 최초 1회만 계산되고 캐시됨.
+async function classifyRequestRegions(){
+  if(!geocoder) return; // 카카오 로드 전이면 나중에 다시 호출됨(각 render 함수에서 매번 시도)
+  const list = loadRequests();
+  const todo = list.filter(r=>!r.region);
+  if(!todo.length) return;
+  for(const r of todo){
+    r.region = await coord2RegionName(r.newLat, r.newLng);
+  }
+  saveRequests(list);
+}
+
+function monthOf(ts){
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function populateMonthFilter(selectId, list){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const prev = sel.value || 'all';
+  const counts = {};
+  list.forEach(r=>{ const m = monthOf(r.submittedAt); counts[m] = (counts[m]||0)+1; });
+  const opts = [`<option value="all">연월: 전체</option>`];
+  Object.keys(counts).sort().reverse().forEach(m=>{
+    opts.push(`<option value="${m}">${m} (${counts[m]}건)</option>`);
+  });
+  const newHtml = opts.join('');
+  if(sel.innerHTML !== newHtml){
+    sel.innerHTML = newHtml;
+    sel.value = counts[prev] ? prev : 'all';
+  }
+}
+
+function onReqSidoChange(){ document.getElementById('reqSigunguFilter').value='all'; renderRequestsList(); }
+function onHistSidoChange(){ document.getElementById('histSigunguFilter').value='all'; renderHistoryList(); }
+
 function renderRequestsList(){
-  const list = loadRequests().filter(r=>r.status==='pending').sort((a,b)=>b.submittedAt-a.submittedAt);
+  doRenderRequestsList();
+  classifyRequestRegions().then(()=>{
+    if(document.getElementById('panel-requests').classList.contains('active')) doRenderRequestsList();
+  });
+}
+function doRenderRequestsList(){
+  const all = loadRequests();
+  const pending = all.filter(r=>r.status==='pending');
+  populateMonthFilter('reqMonthFilter', pending);
+  populateSidoFilter('reqSidoFilter', pending);
+  populateSigunguFilter('reqSidoFilter', 'reqSigunguFilter', pending);
+
+  const month = document.getElementById('reqMonthFilter').value;
+  const sido = document.getElementById('reqSidoFilter').value;
+  const sigungu = document.getElementById('reqSigunguFilter').value;
+
+  const list = pending.filter(r=>{
+    const matchMonth = month==='all' || monthOf(r.submittedAt)===month;
+    const parts = splitRegion(r.region);
+    const matchSido = sido==='all' || parts.sido===sido;
+    const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
+    return matchMonth && matchSido && matchSigungu;
+  }).sort((a,b)=>b.submittedAt-a.submittedAt);
+
   const box = document.getElementById('requestsList');
   refreshRequestBadge();
-  if(!list.length){ box.innerHTML = `<div style="text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;">대기 중인 요청이 없습니다.</div>`; return; }
+  if(!list.length){ box.innerHTML = `<div style="text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;">조건에 맞는 대기 중인 요청이 없습니다.</div>`; return; }
   box.innerHTML = list.map(r=>renderReqCard(r, true)).join('');
 }
 
 function renderHistoryList(){
+  doRenderHistoryList();
+  classifyRequestRegions().then(()=>{
+    if(document.getElementById('panel-history').classList.contains('active')) doRenderHistoryList();
+  });
+}
+function doRenderHistoryList(){
+  const all = loadRequests();
+  populateMonthFilter('histMonthFilter', all);
+  populateSidoFilter('histSidoFilter', all);
+  populateSigunguFilter('histSidoFilter', 'histSigunguFilter', all);
+
   const q = (document.getElementById('historySearch')?.value || '').trim().toLowerCase();
-  let list = loadRequests().sort((a,b)=>b.submittedAt-a.submittedAt);
-  if(q) list = list.filter(r => (r.addr||'').toLowerCase().includes(q) || (r.reason||'').toLowerCase().includes(q));
+  const month = document.getElementById('histMonthFilter').value;
+  const sido = document.getElementById('histSidoFilter').value;
+  const sigungu = document.getElementById('histSigunguFilter').value;
+
+  let list = all.filter(r=>{
+    const matchQ = !q || (r.addr||'').toLowerCase().includes(q) || (r.reason||'').toLowerCase().includes(q);
+    const matchMonth = month==='all' || monthOf(r.submittedAt)===month;
+    const parts = splitRegion(r.region);
+    const matchSido = sido==='all' || parts.sido===sido;
+    const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
+    return matchQ && matchMonth && matchSido && matchSigungu;
+  }).sort((a,b)=>b.submittedAt-a.submittedAt);
+
   const box = document.getElementById('historyList');
   if(!box) return;
   document.getElementById('historyCount').textContent = list.length;
-  if(!list.length){ box.innerHTML = `<div style="text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;">이력이 없습니다.</div>`; return; }
+  if(!list.length){ box.innerHTML = `<div style="text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 0;">조건에 맞는 이력이 없습니다.</div>`; return; }
   box.innerHTML = list.map(r=>renderReqCard(r, false)).join('');
 }
+
 
 function approveRequest(id){
   const list = loadRequests();
@@ -2139,35 +2346,78 @@ const BULK_PAGE_SIZE = 100;
 let bulkFilteredList = [];
 let bulkRenderedCount = 0;
 
+// "강원특별자치도 강릉시" 같은 문자열을 {sido:'강원특별자치도', sigungu:'강릉시'}로 분리
+// (내륙 포함 대한민국 어디든 카카오 좌표→행정구역 결과 형식이 동일해서 그대로 적용됨)
+function splitRegion(regionStr){
+  if(!regionStr) return {sido:'', sigungu:''};
+  const parts = regionStr.trim().split(' ');
+  return { sido: parts[0]||'', sigungu: parts.slice(1).join(' ')||'' };
+}
+
 function buildBulkEditTable(){
   const all = loadRecords();
   document.getElementById('totalCount').textContent = all.length;
-  populateBulkRegionFilter(all);
+  populateSidoFilter('bulkSidoFilter', all);
+  populateSigunguFilter('bulkSidoFilter', 'bulkSigunguFilter', all);
   const q = (document.getElementById('bulkEditSearch').value||'').trim().toLowerCase();
-  const region = document.getElementById('bulkEditRegionFilter').value;
+  const sido = document.getElementById('bulkSidoFilter').value;
+  const sigungu = document.getElementById('bulkSigunguFilter').value;
   bulkFilteredList = all.filter(r=>{
     const matchAddr = !q || (r.addr||'').toLowerCase().includes(q);
-    const matchRegion = region==='all' || r.region===region;
-    return matchAddr && matchRegion;
+    const parts = splitRegion(r.region);
+    const matchSido = sido==='all' || parts.sido===sido;
+    const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
+    return matchAddr && matchSido && matchSigungu;
   });
   bulkRenderedCount = 0;
   document.getElementById('bulkEditBody').innerHTML = '';
   renderMoreBulkRows();
 }
-function populateBulkRegionFilter(all){
-  const sel = document.getElementById('bulkEditRegionFilter');
+
+// 공용: 도/광역시 드롭다운 채우기
+function populateSidoFilter(selectId, all){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
   const prev = sel.value || 'all';
   const counts = {};
-  all.forEach(r=>{ if(r.region) counts[r.region] = (counts[r.region]||0) + 1; });
-  const opts = [`<option value="all">행정구역: 전체 (${all.length}건)</option>`];
-  Object.keys(counts).sort().forEach(region=>{
-    opts.push(`<option value="${region}">${region} (${counts[region]}건)</option>`);
+  all.forEach(r=>{ const {sido} = splitRegion(r.region); if(sido) counts[sido] = (counts[sido]||0)+1; });
+  const opts = [`<option value="all">도/광역시: 전체 (${all.length}건)</option>`];
+  Object.keys(counts).sort().forEach(sido=>{
+    opts.push(`<option value="${sido}">${sido} (${counts[sido]}건)</option>`);
   });
   const newHtml = opts.join('');
-  if(sel.innerHTML !== newHtml){        // 값 유지한 채로 옵션만 갱신(분류 진행 중 계속 늘어남)
+  if(sel.innerHTML !== newHtml){
     sel.innerHTML = newHtml;
     sel.value = counts[prev] || prev==='all' ? prev : 'all';
   }
+}
+// 공용: 선택된 도에 속한 시/군/구만 골라 두 번째 드롭다운 채우기
+function populateSigunguFilter(sidoSelectId, sigunguSelectId, all){
+  const sidoSel = document.getElementById(sidoSelectId);
+  const sel = document.getElementById(sigunguSelectId);
+  if(!sidoSel || !sel) return;
+  const sido = sidoSel.value;
+  const prev = sel.value || 'all';
+  const counts = {};
+  all.forEach(r=>{
+    const parts = splitRegion(r.region);
+    if(!parts.sigungu) return;
+    if(sido!=='all' && parts.sido!==sido) return;
+    counts[parts.sigungu] = (counts[parts.sigungu]||0)+1;
+  });
+  const opts = [`<option value="all">시/군/구: 전체</option>`];
+  Object.keys(counts).sort().forEach(sg=>{
+    opts.push(`<option value="${sg}">${sg} (${counts[sg]}건)</option>`);
+  });
+  const newHtml = opts.join('');
+  if(sel.innerHTML !== newHtml){
+    sel.innerHTML = newHtml;
+    sel.value = counts[prev] ? prev : 'all';
+  }
+}
+function onBulkSidoChange(){
+  document.getElementById('bulkSigunguFilter').value = 'all'; // 도를 바꾸면 시/군 선택 초기화
+  onBulkSearch();
 }
 function onBulkSearch(){ buildBulkEditTable(); }
 
