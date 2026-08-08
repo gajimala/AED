@@ -399,6 +399,22 @@
   </div>
 </div>
 
+<!-- 관리자 코드 확인 후 소속 선택(누가 어디서 작업했는지 이력에 남기기 위함) -->
+<div class="overlay center" id="orgOverlay">
+  <div class="sheet" style="position:relative;">
+    <h2>소속 선택</h2>
+    <p class="sub">이후 작업 이력에 소속이 함께 기록됩니다</p>
+    <div class="msg err" id="orgErr" style="display:none;">지방청·해양경찰서를 선택하고 부서/파출소명을 입력해주세요</div>
+    <label>지방해양경찰청</label>
+    <select id="orgRegionSelect" onchange="onOrgRegionChange()" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;background:#FBFDFE;margin-bottom:10px;"></select>
+    <label>해양경찰서</label>
+    <select id="orgStationSelect" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;background:#FBFDFE;margin-bottom:10px;"></select>
+    <label>부서 / 파출소명 (직접 입력)</label>
+    <input type="text" id="orgDeptInput" placeholder="예) 안인해양파출소, 경비구조과 등">
+    <button class="btn btn-primary" style="margin-top:16px;" onclick="confirmOrgSelection()">확인하고 관리자 모드 시작</button>
+  </div>
+</div>
+
 <!-- 안전교육 패널 -->
 <div id="eduPanel">
   <div class="edu-top">
@@ -564,8 +580,11 @@
 <!-- 관리자 대시보드 -->
 <div id="adminDash">
   <div class="dash-top">
-    <div><span class="title">관리자 모드</span><span class="badge">ADMIN</span></div>
+    <div><span class="title">관리자 모드</span><span class="badge">ADMIN</span><br>
+      <span id="orgDisplay" style="font-size:11.5px;color:rgba(255,255,255,.75);"></span>
+    </div>
     <div style="display:flex;gap:8px;">
+      <button onclick="openOrgOverlay()">소속변경</button>
       <button onclick="closeAdminDash()">지도로</button>
       <button onclick="logoutAdmin()">종료</button>
     </div>
@@ -665,6 +684,14 @@
         <select id="reqSigunguFilter" onchange="renderRequestsList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
           <option value="all">시/군/구: 전체</option>
         </select>
+        <select id="reqSourceFilter" onchange="renderRequestsList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+          <option value="all">출처: 전체</option>
+          <option value="admin">🛡 관리자 직접</option>
+          <option value="civilian">👤 민간인 제보</option>
+        </select>
+        <select id="reqStationFilter" onchange="renderRequestsList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+          <option value="all">소속 해양경찰서: 전체</option>
+        </select>
         <div id="requestsList" style="margin-top:12px;"></div>
       </div>
     </div>
@@ -683,6 +710,14 @@
         </div>
         <select id="histSigunguFilter" onchange="renderHistoryList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
           <option value="all">시/군/구: 전체</option>
+        </select>
+        <select id="histSourceFilter" onchange="renderHistoryList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+          <option value="all">출처: 전체</option>
+          <option value="admin">🛡 관리자 직접</option>
+          <option value="civilian">👤 민간인 제보</option>
+        </select>
+        <select id="histStationFilter" onchange="renderHistoryList()" style="width:100%;margin-top:8px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;background:#FBFDFE;">
+          <option value="all">소속 해양경찰서: 전체</option>
         </select>
         <div style="font-size:12px;color:var(--ink-soft);margin:8px 0;">전체 <b id="historyCount">0</b>건</div>
         <div id="historyList"></div>
@@ -1342,7 +1377,7 @@ function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, re
   upsertRequestEntry({
     id: newId(), type, targetId,
     addr: addr||'', oldLat: oldLat??null, oldLng: oldLng??null, newLat: newLat??null, newLng: newLng??null,
-    reason: reason || '관리자 직접 작업', source:'admin',
+    reason: reason || '관리자 직접 작업', source:'admin', org: currentAdminOrg,
     photoDataUrl: null, photoGPS: null, distance: null,
     submittedAt: Date.now(), resolvedAt: Date.now(), status: 'approved'
   });
@@ -1898,6 +1933,62 @@ function deleteMarker(){
 let codeBuffer = '';
 document.getElementById('adminEntry').addEventListener('click', openCodeOverlay);
 
+/* ---------------- 소속 기관(지방해양경찰청 → 해양경찰서) ----------------
+   2026년 기준 해양경찰청 공식 조직 확인함(5개 지방청 · 21개 해양경찰서).
+   부서/파출소(3차)는 전국 70여 곳이 넘고 개편이 잦아 정확한 목록 유지가 어려워 직접입력 방식으로 둠. */
+const ORG_HIERARCHY = {
+  '중부지방해양경찰청': ['인천해양경찰서','평택해양경찰서','태안해양경찰서','보령해양경찰서'],
+  '서해지방해양경찰청': ['군산해양경찰서','부안해양경찰서','목포해양경찰서','완도해양경찰서','여수해양경찰서'],
+  '남해지방해양경찰청': ['통영해양경찰서','창원해양경찰서','부산해양경찰서','울산해양경찰서','사천해양경찰서'],
+  '동해지방해양경찰청': ['포항해양경찰서','울진해양경찰서','동해해양경찰서','속초해양경찰서','강릉해양경찰서'],
+  '제주지방해양경찰청': ['제주해양경찰서','서귀포해양경찰서'],
+};
+const ORG_STORAGE_KEY = 'gujohham_admin_org_v1';
+let currentAdminOrg = null; // {region, station, dept}
+
+function populateOrgSelects(){
+  const regionSel = document.getElementById('orgRegionSelect');
+  regionSel.innerHTML = Object.keys(ORG_HIERARCHY).map(r=>`<option value="${r}">${r}</option>`).join('');
+  onOrgRegionChange();
+}
+function onOrgRegionChange(){
+  const region = document.getElementById('orgRegionSelect').value;
+  const stationSel = document.getElementById('orgStationSelect');
+  stationSel.innerHTML = (ORG_HIERARCHY[region]||[]).map(s=>`<option value="${s}">${s}</option>`).join('');
+}
+function openOrgOverlay(){
+  populateOrgSelects();
+  // 예전에 선택했던 값이 있으면 미리 채워줌(매번 새로 고를 필요 없게)
+  try{
+    const saved = JSON.parse(localStorage.getItem(ORG_STORAGE_KEY));
+    if(saved){
+      document.getElementById('orgRegionSelect').value = saved.region;
+      onOrgRegionChange();
+      document.getElementById('orgStationSelect').value = saved.station;
+      document.getElementById('orgDeptInput').value = saved.dept || '';
+    }
+  }catch(e){}
+  document.getElementById('orgOverlay').classList.add('show');
+}
+function confirmOrgSelection(){
+  const region = document.getElementById('orgRegionSelect').value;
+  const station = document.getElementById('orgStationSelect').value;
+  const dept = document.getElementById('orgDeptInput').value.trim();
+  if(!region || !station || !dept){
+    document.getElementById('orgErr').style.display = 'block';
+    return;
+  }
+  currentAdminOrg = { region, station, dept };
+  localStorage.setItem(ORG_STORAGE_KEY, JSON.stringify(currentAdminOrg));
+  document.getElementById('orgOverlay').classList.remove('show');
+  updateOrgDisplay();
+  finishEnterAdminMode();
+}
+function updateOrgDisplay(){
+  const el = document.getElementById('orgDisplay');
+  if(el && currentAdminOrg) el.textContent = `${currentAdminOrg.region} · ${currentAdminOrg.station} · ${currentAdminOrg.dept}`;
+}
+
 function openCodeOverlay(){
   codeBuffer = '';
   renderCodeDots();
@@ -1930,7 +2021,7 @@ function onKeypad(n){
     setTimeout(()=>{
       if(codeBuffer===ADMIN_CODE){
         closeCodeOverlay();
-        enterAdminMode();
+        openOrgOverlay();
       } else {
         document.getElementById('codeErr').style.display='block';
         codeBuffer='';
@@ -1945,7 +2036,7 @@ function renderCodeDots(){
 }
 
 let isAdmin = false;
-function enterAdminMode(){
+function finishEnterAdminMode(){
   isAdmin = true;
   document.getElementById('adminEntry').classList.add('active');
   document.getElementById('addReportEntry').style.display = 'none';
@@ -1960,6 +2051,7 @@ function logoutAdmin(){
 function closeAdminDash(){ document.getElementById('adminDash').classList.remove('show'); }
 function openAdminDash(){
   document.getElementById('adminDash').classList.add('show');
+  updateOrgDisplay();
   refreshRequestBadge();
   refreshRequestsCache().then(refreshRequestBadge); // 최신 대기건수로 배지 갱신
   initNewMapPicker(); // 기본 활성 탭이 신규입력이라 여기서 바로 지도 초기화
@@ -2067,7 +2159,7 @@ function renderReqCard(r, actionable){
       ? `<b>삭제된 좌표</b>: ${fmt(r.oldLat)}, ${fmt(r.oldLng)}`
       : `<b>기존 좌표</b>: ${fmt(r.oldLat)}, ${fmt(r.oldLng)}<br><b>변경 좌표</b>: ${fmt(r.newLat)}, ${fmt(r.newLng)}`;
   const sourceBadge = r.source==='admin'
-    ? `<span style="color:var(--navy);font-weight:700;">🛡 관리자 직접</span>`
+    ? `<span style="color:var(--navy);font-weight:700;">🛡 관리자 직접</span>${r.org ? ` <span style="color:var(--ink-soft);font-weight:400;">(${r.org.station}·${r.org.dept})</span>` : ''}`
     : `<span style="color:var(--orange);font-weight:700;">👤 민간인 제보</span>`;
   return `
     <div class="req-card">
@@ -2142,17 +2234,22 @@ function doRenderRequestsList(){
   populateMonthFilter('reqMonthFilter', pending);
   populateSidoFilter('reqSidoFilter', pending);
   populateSigunguFilter('reqSidoFilter', 'reqSigunguFilter', pending);
+  populateStationFilter('reqStationFilter', pending);
 
   const month = document.getElementById('reqMonthFilter').value;
   const sido = document.getElementById('reqSidoFilter').value;
   const sigungu = document.getElementById('reqSigunguFilter').value;
+  const source = document.getElementById('reqSourceFilter').value;
+  const station = document.getElementById('reqStationFilter').value;
 
   const list = pending.filter(r=>{
     const matchMonth = month==='all' || monthOf(r.submittedAt)===month;
     const parts = splitRegion(r.region);
     const matchSido = sido==='all' || parts.sido===sido;
     const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
-    return matchMonth && matchSido && matchSigungu;
+    const matchSource = source==='all' || r.source===source;
+    const matchStation = station==='all' || (r.org && r.org.station===station);
+    return matchMonth && matchSido && matchSigungu && matchSource && matchStation;
   }).sort((a,b)=>b.submittedAt-a.submittedAt);
 
   const box = document.getElementById('requestsList');
@@ -2172,11 +2269,14 @@ function doRenderHistoryList(){
   populateMonthFilter('histMonthFilter', all);
   populateSidoFilter('histSidoFilter', all);
   populateSigunguFilter('histSidoFilter', 'histSigunguFilter', all);
+  populateStationFilter('histStationFilter', all);
 
   const q = (document.getElementById('historySearch')?.value || '').trim().toLowerCase();
   const month = document.getElementById('histMonthFilter').value;
   const sido = document.getElementById('histSidoFilter').value;
   const sigungu = document.getElementById('histSigunguFilter').value;
+  const source = document.getElementById('histSourceFilter').value;
+  const station = document.getElementById('histStationFilter').value;
 
   let list = all.filter(r=>{
     const matchQ = !q || (r.addr||'').toLowerCase().includes(q) || (r.reason||'').toLowerCase().includes(q);
@@ -2184,7 +2284,9 @@ function doRenderHistoryList(){
     const parts = splitRegion(r.region);
     const matchSido = sido==='all' || parts.sido===sido;
     const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
-    return matchQ && matchMonth && matchSido && matchSigungu;
+    const matchSource = source==='all' || r.source===source;
+    const matchStation = station==='all' || (r.org && r.org.station===station);
+    return matchQ && matchMonth && matchSido && matchSigungu && matchSource && matchStation;
   }).sort((a,b)=>b.submittedAt-a.submittedAt);
 
   const box = document.getElementById('historyList');
@@ -2536,7 +2638,24 @@ function populateSidoFilter(selectId, all){
     sel.value = counts[prev] || prev==='all' ? prev : 'all';
   }
 }
-// 공용: 선택된 도에 속한 시/군/구만 골라 두 번째 드롭다운 채우기
+// 공용: 이력 목록에 실제로 등장하는 해양경찰서만 필터 목록에 채움
+function populateStationFilter(selectId, list){
+  const sel = document.getElementById(selectId);
+  if(!sel) return;
+  const prev = sel.value || 'all';
+  const counts = {};
+  list.forEach(r=>{ if(r.org && r.org.station) counts[r.org.station] = (counts[r.org.station]||0)+1; });
+  const opts = [`<option value="all">소속 해양경찰서: 전체</option>`];
+  Object.keys(counts).sort().forEach(st=>{
+    opts.push(`<option value="${st}">${st} (${counts[st]}건)</option>`);
+  });
+  const newHtml = opts.join('');
+  if(sel.innerHTML !== newHtml){
+    sel.innerHTML = newHtml;
+    sel.value = counts[prev] ? prev : 'all';
+  }
+}
+
 function populateSigunguFilter(sidoSelectId, sigunguSelectId, all){
   const sidoSel = document.getElementById(sidoSelectId);
   const sel = document.getElementById(sigunguSelectId);
