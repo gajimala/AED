@@ -2245,9 +2245,7 @@ function revertChange(id){
   classifyMissingRegions();
   refreshNewMapPickerMarkers();
 
-  resolveRequestEntry(id, 'reverted');
-  logAdminChange('edit', entry.targetId, entry.addr, entry.newLat, entry.newLng, entry.oldLat, entry.oldLng,
-    `관리자가 이전 변경(${id})을 되돌림`);
+  resolveRequestEntry(id, 'reverted'); // 원래 이력 항목 하나만 상태를 바꿈 — 새 이력을 따로 만들지 않음
   renderHistoryList();
   buildBulkEditTable();
 }
