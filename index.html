@@ -1964,23 +1964,28 @@ function switchTab(name){
 }
 
 /* ---------------- 신규입력 지도 피커 (직접입력과 병행) ---------------- */
-let newMapPicker = null, newPickMarker = null;
 const NEW_PICK_ICON = () => new kakao.maps.MarkerImage(
   'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><circle cx="15" cy="15" r="12" fill="#FF6B35" stroke="#fff" stroke-width="3"/></svg>`
   ), new kakao.maps.Size(30,30), { offset: new kakao.maps.Point(15,15) }
 );
 
+let newMapPicker = null, newPickMarker = null, newMapClusterer = null;
 function initNewMapPicker(){
   const container = document.getElementById('newMapPicker');
   if(!container || !window.kakao || !kakao.maps) return;
   if(newMapPicker){
     setTimeout(()=>newMapPicker.relayout(), 0); // 탭 전환 직후 컨테이너 크기 재계산
+    refreshNewMapPickerMarkers(); // 그 사이 다른 곳에서 추가/수정된 것 반영
     return;
   }
   const center = (map ? map.getCenter() : new kakao.maps.LatLng(37.78, 128.95));
   newMapPicker = new kakao.maps.Map(container, { center, level: 6 });
-  newPickMarker = new kakao.maps.Marker({ position: center, map: newMapPicker, draggable: true, image: NEW_PICK_ICON() });
+  newMapClusterer = new kakao.maps.MarkerClusterer({
+    map: newMapPicker, averageCenter: true, minLevel: 7, gridSize: 70,
+    styles: [{width:'32px',height:'32px',background:'rgba(15,163,177,.88)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'32px',fontSize:'12px',fontWeight:'700',border:'2px solid #fff'}]
+  });
+  newPickMarker = new kakao.maps.Marker({ position: center, map: newMapPicker, draggable: true, image: NEW_PICK_ICON(), zIndex: 20 });
 
   kakao.maps.event.addListener(newPickMarker, 'dragend', ()=>{
     const p = newPickMarker.getPosition();
@@ -1990,6 +1995,21 @@ function initNewMapPicker(){
     newPickMarker.setPosition(mouseEvent.latLng);
     setNewLatLngFields(mouseEvent.latLng.getLat(), mouseEvent.latLng.getLng());
   });
+
+  refreshNewMapPickerMarkers();
+}
+
+// 신규입력 지도 위에 "기존 구조함들"도 같이 표시 — 클릭하면 일반 지도에서처럼 수정/이동/삭제 시트가 뜸
+// (markerSheet 오버레이가 관리자 대시보드보다 z-index가 높아서, 대시보드를 안 닫고도 그 위에 뜰 수 있음)
+function refreshNewMapPickerMarkers(){
+  if(!newMapClusterer) return;
+  newMapClusterer.clear();
+  const markers = loadRecords().map(rec=>{
+    const m = new kakao.maps.Marker({ position: new kakao.maps.LatLng(rec.lat, rec.lng), image: LIFESAVER_ICON });
+    kakao.maps.event.addListener(m, 'click', ()=> openMarkerSheet(rec.id));
+    return m;
+  });
+  newMapClusterer.addMarkers(markers);
 }
 
 function setNewLatLngFields(lat, lng){
@@ -2018,10 +2038,10 @@ function refreshRequestBadge(){
 
 const TYPE_LABEL = { edit:'📍 위치수정', add:'➕ 신규제보', delete:'🗑 삭제신고' };
 const STATUS_LABEL = {
-  pending: '대기중', auto_approved: '자동승인', approved: '관리자승인', rejected: '반려됨'
+  pending: '대기중', auto_approved: '자동승인', approved: '관리자승인', rejected: '반려됨', reverted: '↩️ 되돌려짐'
 };
 const STATUS_COLOR = {
-  pending: 'var(--ink-soft)', auto_approved: '#1E8E5A', approved: '#1E8E5A', rejected: 'var(--danger)'
+  pending: 'var(--ink-soft)', auto_approved: '#1E8E5A', approved: '#1E8E5A', rejected: 'var(--danger)', reverted: 'var(--orange)'
 };
 
 function renderReqCard(r, actionable){
@@ -2052,6 +2072,10 @@ function renderReqCard(r, actionable){
       <div class="btn-row">
         <button class="btn btn-ghost btn-sm" onclick="rejectRequest('${r.id}')">반려</button>
         <button class="btn btn-primary btn-sm" onclick="approveRequest('${r.id}')">승인하고 반영</button>
+      </div>` : ''}
+      ${(!actionable && (r.status==='approved' || r.status==='auto_approved')) ? `
+      <div class="btn-row">
+        <button class="btn btn-danger btn-sm" onclick="revertChange('${r.id}')">↩️ 이 변경 되돌리기</button>
       </div>` : ''}
     </div>`;
 }
@@ -2171,6 +2195,47 @@ function rejectRequest(id){
   renderRequestsList();
 }
 
+// 이미 반영된 변경(자동승인/관리자승인)을 되돌림 — 민간인 제보든 관리자 직접작업이든 관리자가 여기서 다 되돌릴 수 있음
+function revertChange(id){
+  const entry = loadRequests().find(r=>r.id===id);
+  if(!entry) return;
+  if(!confirm('이 변경을 되돌릴까요?\n\n' + (TYPE_LABEL[entry.type]||entry.type) + ' · ' + (entry.addr||'주소 미입력'))) return;
+
+  if(entry.type === 'add'){
+    // 신규 추가를 되돌림 = 그 구조함을 삭제
+    if(entry.targetId && markerObjs[entry.targetId]){
+      clusterer.removeMarker(markerObjs[entry.targetId].marker);
+      delete markerObjs[entry.targetId];
+    }
+    if(entry.targetId) deleteRecord(entry.targetId);
+  } else if(entry.type === 'delete'){
+    // 삭제를 되돌림 = 예전 좌표로 다시 등록(내부적으로 새 id가 생김 — 예전 id는 복구 불가)
+    const rec = {id:newId(), lat:entry.oldLat, lng:entry.oldLng, addr:entry.addr||'', note:''};
+    upsertRecord(rec);
+    addMarkerToMap(rec);
+  } else { // edit — 예전 좌표로 되돌림
+    if(entry.targetId && markerObjs[entry.targetId]){
+      const rec = {...markerObjs[entry.targetId].record, lat:entry.oldLat, lng:entry.oldLng, region: undefined};
+      upsertRecord(rec);
+      markerObjs[entry.targetId].record = rec;
+      markerObjs[entry.targetId].marker.setPosition(new kakao.maps.LatLng(entry.oldLat, entry.oldLng));
+    } else if(entry.targetId){
+      // 화면에 아직 안 그려진 상태(다른 지역 필터 등)일 수 있어 데이터만이라도 갱신
+      const rec = loadRecords().find(r=>r.id===entry.targetId);
+      if(rec) upsertRecord({...rec, lat:entry.oldLat, lng:entry.oldLng, region: undefined});
+    }
+  }
+  clusterer.redraw();
+  classifyMissingRegions();
+  refreshNewMapPickerMarkers();
+
+  resolveRequestEntry(id, 'reverted');
+  logAdminChange('edit', entry.targetId, entry.addr, entry.newLat, entry.newLng, entry.oldLat, entry.oldLng,
+    `관리자가 이전 변경(${id})을 되돌림`);
+  renderHistoryList();
+  buildBulkEditTable();
+}
+
 /* ---------------- 신규입력 ---------------- */
 function addSingle(){
   const lat = parseFloat(document.getElementById('newLat').value);
@@ -2192,6 +2257,7 @@ function addSingle(){
   document.getElementById('newAddr').value='';
   document.getElementById('newNote').value='';
   buildBulkEditTable();
+  refreshNewMapPickerMarkers();
 }
 
 /* ---------------- 대량입력 ---------------- */
