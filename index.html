@@ -819,7 +819,7 @@ function upsertRecord(rec){
   }).then(res=>{
       if(!res.ok) throw new Error('HTTP '+res.status);
       // 저장 자체는 성공 — 이제 실제 지도(GitHub Pages)에 반영될 때까지 백그라운드로 확인
-      queueSyncCheck(rec.id, isNew?'add':'edit', rec.lat, rec.lng);
+      showSyncDone();
     })
     .catch(e=>{
       console.error('서버 저장 실패', e);
@@ -832,7 +832,7 @@ function deleteRecord(id){
   fetch(`${WORKER_URL}/lifesavers/${id}`, { method:'DELETE', headers:{ 'X-Admin-Code': ADMIN_CODE } })
     .then(res=>{
       if(!res.ok) throw new Error('HTTP '+res.status);
-      queueSyncCheck(id, 'delete', null, null);
+      showSyncDone();
     })
     .catch(e=>{
       console.error('서버 삭제 실패', e);
@@ -842,116 +842,18 @@ function deleteRecord(id){
 function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
 
 /* =========================================================
-   지도 반영 대기 표시 — Worker 저장은 성공했지만 GitHub Pages가
-   실제로 다시 빌드/배포되기까지는 몇십 초 정도 걸릴 수 있음.
-   화면에 "대기중"을 보여주고, lifesavers.json을 주기적으로 다시
-   읽어서 실제로 반영된 걸 확인하면 "완료"로 바꿔줌.
+   저장 완료 표시 — Worker가 저장 성공했다고 응답하면 바로 "완료"를 보여주고
+   2.5초 후 자동으로 사라짐. 실제 지도(GitHub Pages)에 언제 반영되는지까지는
+   추적하지 않음 — 그 부분은 몇십 초 정도 걸릴 수 있다는 걸 안내만 함.
    ========================================================= */
-let _pendingSync = new Map(); // id -> {type:'add'|'edit'|'delete', lat, lng}
-let _syncPollTimer = null;
-let _syncPollStartedAt = 0;
-const SYNC_POLL_INTERVAL_MS = 5000;
-const SYNC_POLL_TIMEOUT_MS = 120000; // 2분 넘으면 포기하고 안내만 바꿔줌
-const SYNC_STORAGE_KEY = 'gujohham_pending_sync_v1';
+let _syncHideTimer = null; // 여러 번 연달아 떠도 타이머가 안 겹치게 하나만 추적
 
-// 새로고침해도 "아직 대기중인 것"을 잊지 않도록 localStorage에 저장해둠
-function persistSyncState(){
-  try{
-    if(_pendingSync.size===0){ localStorage.removeItem(SYNC_STORAGE_KEY); return; }
-    localStorage.setItem(SYNC_STORAGE_KEY, JSON.stringify({
-      startedAt: _syncPollStartedAt,
-      items: [..._pendingSync.entries()]
-    }));
-  }catch(e){ /* 저장 실패해도 치명적이지 않음(그냥 새로고침 시 못 이어감) */ }
-}
-
-// 페이지가 새로 열릴 때, 예전에 대기중이던 게 있으면 이어서 확인 시작
-function resumeSyncStateFromStorage(){
-  try{
-    const raw = localStorage.getItem(SYNC_STORAGE_KEY);
-    if(!raw) return;
-    const saved = JSON.parse(raw);
-    if(!saved.items || !saved.items.length) return;
-    _pendingSync = new Map(saved.items);
-    _syncPollStartedAt = saved.startedAt || Date.now();
-    updateSyncBanner();
-    _syncPollTimer = setInterval(pollSyncOnce, SYNC_POLL_INTERVAL_MS);
-    pollSyncOnce();
-  }catch(e){ console.error('대기중 상태 복원 실패', e); }
-}
-
-function queueSyncCheck(id, type, lat, lng){
-  _pendingSync.set(id, { type, lat, lng });
-  updateSyncBanner();
-  persistSyncState();
-  if(!_syncPollTimer){
-    _syncPollStartedAt = Date.now();
-    _syncPollTimer = setInterval(pollSyncOnce, SYNC_POLL_INTERVAL_MS);
-    pollSyncOnce(); // 첫 확인은 바로
-  }
-}
-// 폰 화면을 껐다 켜거나 다른 앱 갔다 돌아오면, 브라우저가 백그라운드에서 setInterval을 멈추거나
-// 늦춰버려서 "대기중"이 안 없어지는 것처럼 보일 수 있음 — 화면에 다시 돌아온 순간 바로 한 번 더 확인.
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible' && _pendingSync.size > 0){
-    pollSyncOnce();
-  }
-});
-
-function updateSyncBanner(){
+function showSyncDone(n){
   const box = document.getElementById('syncStatus');
-  const n = _pendingSync.size;
-  if(n===0){ return; } // 완료 처리는 pollSyncOnce에서 별도로 함
-  box.className = 'show';
-  box.innerHTML = `<span class="spin"></span> 지도 반영 대기중… (${n}건)`;
-}
-
-let _syncHideTimer = null; // "완료"/"타임아웃" 표시를 없애는 타이머 — 여러 개가 겹쳐 쌓이지 않도록 하나만 추적
-
-async function pollSyncOnce(){
-  if(_pendingSync.size===0){
-    clearInterval(_syncPollTimer); _syncPollTimer = null;
-    return;
-  }
-  if(Date.now() - _syncPollStartedAt > SYNC_POLL_TIMEOUT_MS){
-    const box = document.getElementById('syncStatus');
-    clearTimeout(_syncHideTimer);
-    box.className = 'show timeout';
-    box.innerHTML = `⏳ 반영이 예상보다 오래 걸리고 있어요. 잠시 후 새로고침해서 확인해주세요.`;
-    _syncHideTimer = setTimeout(()=>{ box.classList.remove('show'); }, 4000);
-    _pendingSync.clear();
-    persistSyncState();
-    clearInterval(_syncPollTimer); _syncPollTimer = null;
-    return;
-  }
-  try{
-    const res = await fetch(`${SEED_JSON_URL}?sync=${Date.now()}`, { cache:'no-store' });
-    if(!res.ok) return;
-    const list = await res.json();
-    const byId = new Map(list.map(r=>[r.id, r]));
-    for(const [id, want] of [..._pendingSync]){
-      const rec = byId.get(id);
-      let done = false;
-      if(want.type === 'delete') done = !rec;
-      else if(want.type === 'add') done = !!rec; // 신규는 id가 존재하기만 하면 완료(좌표 미세 반올림 차이로 영원히 대기되는 것 방지)
-      // 수정은 좌표가 "그 방향으로" 바뀐 게 맞는지만 확인(약 10m 오차는 반올림으로 보고 허용)
-      else if(rec) done = Math.abs(rec.lat-want.lat) < 0.0001 && Math.abs(rec.lng-want.lng) < 0.0001;
-      if(done) _pendingSync.delete(id);
-    }
-  }catch(e){ console.error('반영 확인 실패', e); return; }
-
-  persistSyncState(); // 완료된 항목이 지워졌으니(또는 그대로면) 최신 상태로 다시 저장
-  if(_pendingSync.size===0){
-    const box = document.getElementById('syncStatus');
-    clearTimeout(_syncHideTimer); // 이전에 걸려있던 숨김 타이머가 있으면 취소하고 새로 하나만 설정
-    box.className = 'show done';
-    box.innerHTML = `✅ 지도에 반영 완료`;
-    _syncHideTimer = setTimeout(()=>{ box.classList.remove('show'); }, 2500);
-    clearInterval(_syncPollTimer); _syncPollTimer = null;
-  } else {
-    clearTimeout(_syncHideTimer); _syncHideTimer = null; // 아직 남은 게 있으면 숨김 예약을 취소(대기중 표시를 계속 보여줘야 하므로)
-    updateSyncBanner();
-  }
+  clearTimeout(_syncHideTimer);
+  box.className = 'show done';
+  box.innerHTML = n>1 ? `✅ ${n}건 저장 완료` : `✅ 저장 완료`;
+  _syncHideTimer = setTimeout(()=>{ box.classList.remove('show'); }, 2500);
 }
 
 
@@ -980,7 +882,7 @@ window.addEventListener('load', ()=>{
   ensureLoaded().then(()=>{
     // 대시보드가 이미 열려 있었다면(드문 케이스) 표를 최신 데이터로 갱신
     if(document.getElementById('adminDash').classList.contains('show')) buildBulkEditTable();
-    resumeSyncStateFromStorage(); // 새로고침 전에 "대기중"이던 게 있으면 이어서 확인
+    // (저장 완료 표시는 이제 저장 시점에만 잠깐 뜨고 사라짐 — 새로고침 간 상태 유지 불필요)
   });
 
   // 카카오 SDK 로드가 실패해도(앱키 미설정, 도메인 미등록, 네트워크 문제 등)
@@ -1833,7 +1735,7 @@ function applyApprovedChange(entry, isCivilianAuto){
         const tmp = loadRecords().find(r=>r.__tmp);
         if(tmp){ delete tmp.__tmp; tmp.id = saved.id; }
       }
-      queueSyncCheck(entry.targetId, entry.type, entry.newLat, entry.newLng);
+      showSyncDone();
     }).catch(e=>{
       console.error('자동승인 반영 실패', e);
       alert('제보는 접수됐지만 즉시 반영에 실패했습니다. 관리자 확인 후 반영됩니다.');
