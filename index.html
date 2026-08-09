@@ -908,13 +908,17 @@ async function pollSyncOnce(){
 // 지역/주소 자동채우기처럼 여러 건을 한 번에 고칠 때 — Worker가 커밋 1번으로 처리(대량 커밋 방지)
 async function batchPatchRecords(patches){
   if(!patches.length) return;
-  try{
-    const res = await fetch(`${WORKER_URL}/lifesavers/batch`, {
-      method:'POST', headers:{ 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
-      body: JSON.stringify({patches})
-    });
-    if(!res.ok) throw new Error('HTTP '+res.status);
-  }catch(e){ console.error('일괄 저장 실패', e); }
+  const res = await fetch(`${WORKER_URL}/lifesavers/batch`, {
+    method:'POST', headers:{ 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
+    body: JSON.stringify({patches})
+  });
+  if(!res.ok){
+    const errText = await res.text().catch(()=> '');
+    // ⚠️ 예전엔 여기서 에러를 그냥 콘솔에만 찍고 넘어가서, 실제로는 저장이 실패했는데도
+    // 화면엔 "진행중/완료"처럼 보이고 다음에 다시 열면 아무것도 저장 안 된 채로 처음부터 또
+    // 돌아가는 문제가 있었음. 이제 실패를 호출한 쪽(classifyMissingRegions)까지 그대로 전달함.
+    throw new Error(`HTTP ${res.status} ${errText}`.trim());
+  }
 }
 
 /* =========================================================
@@ -1006,7 +1010,9 @@ async function initMap(){
 
   geocoder = new kakao.maps.services.Geocoder();
   populateRegionSelect();
-  classifyMissingRegions();       // 아직 행정구역이 안 붙은 좌표만 백그라운드로 분류(최초 1회, 이후 캐시됨)
+  // ⚠️ 예전엔 여기서 모든 방문자 브라우저가 자동으로 주소분류 작업을 이어받았음 —
+  // 관리자 코드가 필요한 작업이라 일반 방문자에게 노출되는 게 부적절하고, 방문자가 금방 나가면
+  // 끝까지 못 마치고 계속 반복되는 문제도 있었음. 이제는 관리자 로그인 시에만 진행됨(finishEnterAdminMode 참고).
 
   // 처음엔 내 GPS 위치를 중심으로 먼저 맞추고(최대 8초 대기, 실패해도 넘어감) —
   // 이후엔 지도를 강제로 다시 옮기지 않음(사용자가 팬/줌하면 그대로 둠)
@@ -1124,6 +1130,7 @@ function coord2RegionAndAddress(lat, lng){
 
 let _classifyInProgress = false; // 관리자가 여러 액션을 연달아 하면 매번 이 함수가 다시 불리는데, 이미 돌고 있으면 또 시작하지 않게 막음(저장 충돌 방지)
 async function classifyMissingRegions(){
+  if(!isAdmin) return; // 관리자 코드가 필요한 쓰기 작업이라 방어적으로 한 번 더 막음(일반 방문자 브라우저에서 절대 안 돌게)
   if(_classifyInProgress) return;
   // ⚠️ 대상 선정 기준이 중요함:
   // 방파제·테트라포드처럼 바다 위 좌표는 카카오에 주소 자체가 존재하지 않아서 아무리 조회해도
@@ -1160,6 +1167,11 @@ async function classifyMissingRegions(){
         pendingPatches = [];
       }
     }
+  } catch(e){
+    console.error('주소·행정구역 자동입력 중 오류:', e);
+    progress.textContent = `⚠️ 저장 실패: ${e.message} (다음 로그인 때 이어서 시도됩니다)`;
+    setTimeout(()=>{ progress.classList.remove('show'); }, 6000);
+    return; // 아래 정상종료 코드(progress 즉시 숨김)를 건너뛰어 에러 메시지를 잠깐 보이게 함
   } finally {
     _classifyInProgress = false;
   }
@@ -2243,6 +2255,7 @@ function finishEnterAdminMode(){
   document.getElementById('adminEntry').classList.add('active');
   document.getElementById('addReportEntry').style.display = 'none';
   openAdminDash();
+  classifyMissingRegions(); // 관리자가 들어왔을 때만 남은 주소/행정구역 백그라운드 분류 진행
 }
 function logoutAdmin(){
   isAdmin = false;
