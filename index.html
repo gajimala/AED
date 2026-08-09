@@ -122,8 +122,7 @@
     display:none;position:fixed;left:50%;transform:translateX(-50%);
     bottom:calc(80px + env(safe-area-inset-bottom));z-index:950;
     background:#12222E;color:#fff;font-size:12.5px;padding:10px 16px;border-radius:24px;
-    box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;
-    align-items:center;gap:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;align-items:center;gap:8px;
   }
   #syncStatus.show{display:flex;}
   #syncStatus .spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin 0.8s linear infinite;flex-shrink:0;}
@@ -844,7 +843,7 @@ function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
 
 /* =========================================================
    저장 완료 표시 — Worker가 저장 성공했다고 응답하면 바로 "완료"를 보여주고
-   1.5초 후 자동으로 사라짐. 실제 지도(GitHub Pages)에 언제 반영되는지까지는
+   2.5초 후 자동으로 사라짐. 실제 지도(GitHub Pages)에 언제 반영되는지까지는
    추적하지 않음 — 그 부분은 몇십 초 정도 걸릴 수 있다는 걸 안내만 함.
    ========================================================= */
 let _syncHideTimer = null; // 여러 번 연달아 떠도 타이머가 안 겹치게 하나만 추적
@@ -856,8 +855,8 @@ function showSyncDone(n){
   clearTimeout(_syncHideTimer);
   box.className = 'show done';
   box.innerHTML = n>1 ? `✅ ${n}건 저장 완료` : `✅ 저장 완료`;
-  _syncHideAt = Date.now() + 1500;
-  _syncHideTimer = setTimeout(hideSyncBoxIfDue, 1500);
+  _syncHideAt = Date.now() + 2500;
+  _syncHideTimer = setTimeout(hideSyncBoxIfDue, 2500);
 }
 function hideSyncBoxIfDue(){
   if(_syncHideAt && Date.now() >= _syncHideAt){
@@ -1711,10 +1710,18 @@ async function submitReport(){
     // ⚠️ 반드시 기다린 뒤에 이력을 저장해야 함 — 신규제보(add)는 서버가 실제 id를 새로 만들어서
     // 알려주는데, 그 전에 이력부터 저장해버리면 이력엔 옛 임시 id가 남아서 나중에 관리자가
     // "이 변경 취소"를 눌러도 실제 레코드를 못 찾아 아무 일도 안 일어나는 문제가 생김.
-    await applyApprovedChange(entry, true); // 민간인 자동승인 — 관리자 코드 없이 서버가 거리 재검증 후 반영
-    entry.resolvedAt = Date.now();
-    msg.textContent = `✅ ${Math.round(distance)}m 이내로 확인되어 자동 처리되었습니다. 지도에 즉시 반영됐어요.`;
-    msg.className = 'msg ok'; msg.style.display = 'block';
+    try{
+      await applyApprovedChange(entry, true); // 민간인 자동승인 — 관리자 코드 없이 서버가 거리 재검증 후 반영
+      entry.resolvedAt = Date.now();
+      msg.textContent = `✅ ${Math.round(distance)}m 이내로 확인되어 자동 처리되었습니다. 지도에 즉시 반영됐어요.`;
+      msg.className = 'msg ok'; msg.style.display = 'block';
+    }catch(e){
+      // ⚠️ 실제 서버 반영이 실패했는데도 화면엔 "성공"으로 뜨고 이력엔 auto_approved로 남는 문제가 있었음.
+      // 이제 진짜 실패하면 상태를 "대기중"으로 낮춰서 관리자가 확인하도록 정확히 남김.
+      entry.status = 'pending';
+      msg.textContent = '자동 반영에 실패했습니다. 관리자 확인 후 처리될 예정입니다.';
+      msg.className = 'msg err'; msg.style.display = 'block';
+    }
   } else {
     msg.textContent = distance!=null
       ? `기준 거리(${AUTO_APPROVE_RADIUS_M}m)를 넘어 자동처리가 안 됐습니다(${Math.round(distance)}m 차이). 관리자 확인 후 반영됩니다.`
@@ -1733,38 +1740,35 @@ async function submitReport(){
 // 승인(자동 또는 관리자 수동)된 변경을 실제 지도/데이터에 반영
 // isCivilianAuto=true 이면 관리자 코드 없이 /lifesavers/auto 로 보내고, 서버가 사진GPS 거리를
 // 다시 검증해서 통과한 경우에만 반영함(민간인 브라우저에 관리자 코드를 노출하지 않기 위함).
-function applyApprovedChange(entry, isCivilianAuto){
+async function applyApprovedChange(entry, isCivilianAuto){
   if(isCivilianAuto){
-    // ⚠️ Promise를 반환함 — 호출한 쪽(submitReport)이 서버가 실제로 부여한 id를 받을 때까지
-    // 기다렸다가 이력을 저장해야, 화면/이력이 기억하는 id와 서버에 실제 저장된 id가 어긋나지 않음.
-    return fetch(`${WORKER_URL}/lifesavers/auto`, {
+    // 서버에 먼저 반영을 요청하고, 성공 응답을 받은 뒤에만 화면(로컬)도 갱신함.
+    // ⚠️ 예전엔 이 civilian 분기가 함수 중간에 return 해버려서, 아래에 있는 "화면 반영" 코드가
+    // 민간인 경로에서는 아예 실행되지 않았음 — 그래서 서버 삭제가 성공해도 제보한 사람
+    // 화면에서는 마커가 안 사라지는 문제가 있었음. 이제 성공 응답을 받은 뒤 화면도 반드시 갱신함.
+    const res = await fetch(`${WORKER_URL}/lifesavers/auto`, {
       method:'POST', headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({
         type: entry.type, targetId: entry.targetId,
         newLat: entry.newLat, newLng: entry.newLng,
         photoGPS: entry.photoGPS, addr: entry.addr
       })
-    }).then(async res=>{
-      if(!res.ok){ const t = await res.text(); throw new Error(t); }
-      const saved = await res.json();
-      if(entry.type==='add' && saved && saved.id){
-        entry.targetId = saved.id;
-        // 서버가 만든 실제 id로 화면쪽 임시 레코드를 맞춰줌
-        const tmp = loadRecords().find(r=>r.__tmp);
-        if(tmp){ delete tmp.__tmp; tmp.id = saved.id; }
-      }
-      showSyncDone();
-    }).catch(e=>{
-      console.error('자동승인 반영 실패', e);
-      alert('제보는 접수됐지만 즉시 반영에 실패했습니다. 관리자 확인 후 반영됩니다.');
     });
+    if(!res.ok){
+      const t = await res.text().catch(()=> '');
+      throw new Error(t || ('HTTP '+res.status));
+    }
+    const saved = await res.json();
+    if(entry.type==='add' && saved && saved.id) entry.targetId = saved.id;
+    showSyncDone();
+    // 서버 반영 성공 확인됨 — 이제 화면(로컬)도 갱신
   }
 
-  // 화면(로컬)에는 즉시 반영 — 관리자 경로일 때는 아래 upsert/deleteRecord가 서버 저장까지 담당
+  // 화면(로컬) 반영 — 관리자 경로에선 upsert/deleteRecord가 서버 저장까지 같이 담당,
+  // 민간인 경로에선 위에서 서버 반영이 이미 끝난 뒤라 여기선 화면 갱신만 함(중복 저장 방지).
   if(entry.type==='add'){
-    const rec = {id:newId(), lat:entry.newLat, lng:entry.newLng, addr:entry.addr||'', note:''};
+    const rec = {id: entry.targetId || newId(), lat:entry.newLat, lng:entry.newLng, addr:entry.addr||'', note:''};
     if(isCivilianAuto){
-      rec.__tmp = true;                 // 서버가 발급한 id로 곧 교체됨
       _cache = loadRecords().concat([rec]);
     } else {
       upsertRecord(rec);
