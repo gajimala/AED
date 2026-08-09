@@ -804,40 +804,40 @@ function loadRecords(){ return _cache || []; }
 
 // 화면 반응은 즉시(낙관적 갱신), 실제 저장은 Worker를 거쳐 GitHub에 커밋됨.
 // 저장 실패 시(네트워크 문제, Worker 미배포 등) 사용자에게 바로 알림.
-function upsertRecord(rec){
+async function upsertRecord(rec){
   const list = loadRecords();
   const i = list.findIndex(r=>r.id===rec.id);
   const isNew = i === -1;
   rec.updatedAt = Date.now();
   if(!isNew) list[i] = {...list[i], ...rec}; else list.push(rec);
-  _cache = list;
+  _cache = list; // 여기까지는 항상 동기적으로 즉시 실행됨(아래 await 전) — 기존 호출부(기다리지 않는 곳들)는 그대로 동작
   const url = isNew ? `${WORKER_URL}/lifesavers` : `${WORKER_URL}/lifesavers/${rec.id}`;
-  fetch(url, {
-    method: isNew ? 'POST' : 'PUT',
-    headers: { 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
-    body: JSON.stringify(rec)
-  }).then(res=>{
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      // 저장 자체는 성공 — 이제 실제 지도(GitHub Pages)에 반영될 때까지 백그라운드로 확인
-      showSyncDone();
-    })
-    .catch(e=>{
-      console.error('서버 저장 실패', e);
-      alert('서버 저장에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면에는 반영됐지만 새로고침하면 사라질 수 있습니다.');
+  try{
+    const res = await fetch(url, {
+      method: isNew ? 'POST' : 'PUT',
+      headers: { 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
+      body: JSON.stringify(rec)
     });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    showSyncDone();
+  }catch(e){
+    console.error('서버 저장 실패', e);
+    alert('서버 저장에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면에는 반영됐지만 새로고침하면 사라질 수 있습니다.');
+    throw e; // await하는 쪽(예: revertChange)이 실패를 알 수 있게 전달
+  }
   return list;
 }
-function deleteRecord(id){
+async function deleteRecord(id){
   _cache = loadRecords().filter(r=>r.id!==id);
-  fetch(`${WORKER_URL}/lifesavers/${id}`, { method:'DELETE', headers:{ 'X-Admin-Code': ADMIN_CODE } })
-    .then(res=>{
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      showSyncDone();
-    })
-    .catch(e=>{
-      console.error('서버 삭제 실패', e);
-      alert('서버 삭제에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요).');
-    });
+  try{
+    const res = await fetch(`${WORKER_URL}/lifesavers/${id}`, { method:'DELETE', headers:{ 'X-Admin-Code': ADMIN_CODE } });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    showSyncDone();
+  }catch(e){
+    console.error('서버 삭제 실패', e);
+    alert('서버 삭제에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요).');
+    throw e; // await하는 쪽이 실패를 알 수 있게 전달
+  }
 }
 function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
 
@@ -2508,40 +2508,51 @@ function rejectRequest(id){
 }
 
 // 이미 반영된 변경(자동승인/관리자승인)을 되돌림 — 민간인 제보든 관리자 직접작업이든 관리자가 여기서 다 되돌릴 수 있음
-function revertChange(id){
+async function revertChange(id){
   const entry = loadRequests().find(r=>r.id===id);
   if(!entry) return;
   if(!confirm('이 변경을 취소할까요?\n\n' + (TYPE_LABEL[entry.type]||entry.type) + ' · ' + (entry.addr||'주소 미입력'))) return;
 
-  if(entry.type === 'add'){
-    // 신규 추가를 되돌림 = 그 구조함을 삭제
-    if(entry.targetId && markerObjs[entry.targetId]){
-      clusterer.removeMarker(markerObjs[entry.targetId].marker);
-      delete markerObjs[entry.targetId];
-    }
-    if(entry.targetId) deleteRecord(entry.targetId);
-  } else if(entry.type === 'delete'){
-    // 삭제를 되돌림 = 예전 좌표로 다시 등록(내부적으로 새 id가 생김 — 예전 id는 복구 불가)
-    const rec = {id:newId(), lat:entry.oldLat, lng:entry.oldLng, addr:entry.addr||'', note:''};
-    upsertRecord(rec);
-    addMarkerToMap(rec);
-  } else { // edit — 예전 좌표로 되돌림
-    if(entry.targetId && markerObjs[entry.targetId]){
-      const rec = {...markerObjs[entry.targetId].record, lat:entry.oldLat, lng:entry.oldLng, region: undefined};
-      upsertRecord(rec);
-      markerObjs[entry.targetId].record = rec;
-      markerObjs[entry.targetId].marker.setPosition(new kakao.maps.LatLng(entry.oldLat, entry.oldLng));
-    } else if(entry.targetId){
-      // 화면에 아직 안 그려진 상태(다른 지역 필터 등)일 수 있어 데이터만이라도 갱신
-      const rec = loadRecords().find(r=>r.id===entry.targetId);
-      if(rec) upsertRecord({...rec, lat:entry.oldLat, lng:entry.oldLng, region: undefined});
-    }
-  }
-  clusterer.redraw();
-  classifyMissingRegions();
-  refreshNewMapPickerMarkers();
+  // 버튼에 진행 상태 표시 — 그동안 아무 반응이 없어 보여서 헷갈린다는 문제 해결
+  const btn = document.querySelector(`button[onclick="revertChange('${id}')"]`);
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 취소 처리 중…'; }
 
-  resolveRequestEntry(id, 'reverted'); // 원래 이력 항목 하나만 상태를 바꿈 — 새 이력을 따로 만들지 않음
+  try{
+    if(entry.type === 'add'){
+      // 신규 추가를 되돌림 = 그 구조함을 삭제
+      if(entry.targetId && markerObjs[entry.targetId]){
+        clusterer.removeMarker(markerObjs[entry.targetId].marker);
+        delete markerObjs[entry.targetId];
+      }
+      if(entry.targetId) await deleteRecord(entry.targetId);
+    } else if(entry.type === 'delete'){
+      // 삭제를 되돌림 = 예전 좌표로 다시 등록(내부적으로 새 id가 생김 — 예전 id는 복구 불가)
+      const rec = {id:newId(), lat:entry.oldLat, lng:entry.oldLng, addr:entry.addr||'', note:''};
+      await upsertRecord(rec);
+      addMarkerToMap(rec);
+    } else { // edit — 예전 좌표로 되돌림
+      if(entry.targetId && markerObjs[entry.targetId]){
+        const rec = {...markerObjs[entry.targetId].record, lat:entry.oldLat, lng:entry.oldLng, region: undefined};
+        await upsertRecord(rec);
+        markerObjs[entry.targetId].record = rec;
+        markerObjs[entry.targetId].marker.setPosition(new kakao.maps.LatLng(entry.oldLat, entry.oldLng));
+      } else if(entry.targetId){
+        // 화면에 아직 안 그려진 상태(다른 지역 필터 등)일 수 있어 데이터만이라도 갱신
+        const rec = loadRecords().find(r=>r.id===entry.targetId);
+        if(rec) await upsertRecord({...rec, lat:entry.oldLat, lng:entry.oldLng, region: undefined});
+      }
+    }
+    clusterer.redraw();
+    classifyMissingRegions();
+    refreshNewMapPickerMarkers();
+
+    resolveRequestEntry(id, 'reverted'); // 원래 이력 항목 하나만 상태를 바꿈 — 새 이력을 따로 만들지 않음
+  }catch(e){
+    // upsertRecord/deleteRecord가 실패하면 이미 자체적으로 alert를 띄웠으므로 여기선 버튼만 원상복구
+    console.error('취소 처리 실패', e);
+    if(btn){ btn.disabled = false; btn.textContent = '🚫 이 변경 취소'; }
+    return; // 이력 상태를 "취소완료"로 바꾸지 않음 — 실제로 실패했으므로
+  }
   renderHistoryList();
   buildBulkEditTable();
 }
