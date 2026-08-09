@@ -399,6 +399,16 @@
   </div>
 </div>
 
+<!-- 관리자 코드 확인 후: 마스터로 바로 시작할지, 소속 선택하고 시작할지 선택 -->
+<div class="overlay center" id="loginTypeOverlay">
+  <div class="sheet" style="position:relative;">
+    <h2>어떻게 시작할까요?</h2>
+    <p class="sub">마스터는 소속 선택 없이 바로 전체 관리 화면으로 들어갑니다</p>
+    <button class="btn btn-navy" onclick="startAsMaster()">🔑 마스터로 시작 (소속 선택 없음)</button>
+    <button class="btn btn-primary" style="margin-top:10px;" onclick="startAsStationAdmin()">🏢 소속 기관 선택하고 시작</button>
+  </div>
+</div>
+
 <!-- 관리자 코드 확인 후 소속 선택(누가 어디서 작업했는지 이력에 남기기 위함) -->
 <div class="overlay center" id="orgOverlay">
   <div class="sheet" style="position:relative;">
@@ -410,7 +420,7 @@
     <label>해양경찰서</label>
     <select id="orgStationSelect" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;background:#FBFDFE;margin-bottom:10px;"></select>
     <label>부서 / 파출소명 (직접 입력)</label>
-    <input type="text" id="orgDeptInput" placeholder="예) 안인해양파출소, 경비구조과 등">
+    <input type="text" id="orgDeptInput" placeholder="예) 안인파출소, 경비구조과 등">
     <button class="btn btn-primary" style="margin-top:16px;" onclick="confirmOrgSelection()">확인하고 관리자 모드 시작</button>
   </div>
 </div>
@@ -1908,6 +1918,10 @@ function toggleMoveMode(){
     if(moveModeId) markerObjs[moveModeId].marker.setDraggable(false);
     marker.setDraggable(true);
     moveModeId = id;
+    closeMarkerSheet(); // 정보창이 화면을 덮고 있으면 지도를 터치할 수 없으므로 이동 시작 시 닫아줌
+    if(document.getElementById('adminDash').classList.contains('show')) closeAdminDash(); // 신규입력 탭 미니맵에서 눌렀어도 실제 이동은 메인 지도에서 이뤄지므로 대시보드도 닫음
+    alert('지도에서 주황 아이콘을 드래그해서 옮겨주세요.\n옮기면 자동으로 저장됩니다.\n(다시 아이콘을 누르면 "이동 완료"로 종료할 수 있습니다)');
+    return;
   }
   document.getElementById('moveBtn').textContent = (moveModeId===id) ? '이동 완료' : '아이콘 이동';
   const m=document.getElementById('markerMsg');
@@ -1956,6 +1970,18 @@ function onOrgRegionChange(){
   const stationSel = document.getElementById('orgStationSelect');
   stationSel.innerHTML = (ORG_HIERARCHY[region]||[]).map(s=>`<option value="${s}">${s}</option>`).join('');
 }
+// 마스터(본인 전용) — 소속 선택 없이 바로 시작. 이력에는 소속 없이 "마스터 관리자"로 표시됨.
+function startAsMaster(){
+  document.getElementById('loginTypeOverlay').classList.remove('show');
+  currentAdminOrg = null;
+  updateOrgDisplay();
+  finishEnterAdminMode();
+}
+// 소속 기관 담당자 — 소속 선택 화면으로 이동
+function startAsStationAdmin(){
+  document.getElementById('loginTypeOverlay').classList.remove('show');
+  openOrgOverlay();
+}
 function openOrgOverlay(){
   populateOrgSelects();
   // 예전에 선택했던 값이 있으면 미리 채워줌(매번 새로 고를 필요 없게)
@@ -1986,7 +2012,10 @@ function confirmOrgSelection(){
 }
 function updateOrgDisplay(){
   const el = document.getElementById('orgDisplay');
-  if(el && currentAdminOrg) el.textContent = `${currentAdminOrg.region} · ${currentAdminOrg.station} · ${currentAdminOrg.dept}`;
+  if(!el) return;
+  el.textContent = currentAdminOrg
+    ? `${currentAdminOrg.region} · ${currentAdminOrg.station} · ${currentAdminOrg.dept}`
+    : '🔑 마스터 관리자 (소속 미지정)';
 }
 
 function openCodeOverlay(){
@@ -2021,7 +2050,7 @@ function onKeypad(n){
     setTimeout(()=>{
       if(codeBuffer===ADMIN_CODE){
         closeCodeOverlay();
-        openOrgOverlay();
+        document.getElementById('loginTypeOverlay').classList.add('show');
       } else {
         document.getElementById('codeErr').style.display='block';
         codeBuffer='';
@@ -2159,7 +2188,7 @@ function renderReqCard(r, actionable){
       ? `<b>삭제된 좌표</b>: ${fmt(r.oldLat)}, ${fmt(r.oldLng)}`
       : `<b>기존 좌표</b>: ${fmt(r.oldLat)}, ${fmt(r.oldLng)}<br><b>변경 좌표</b>: ${fmt(r.newLat)}, ${fmt(r.newLng)}`;
   const sourceBadge = r.source==='admin'
-    ? `<span style="color:var(--navy);font-weight:700;">🛡 관리자 직접</span>${r.org ? ` <span style="color:var(--ink-soft);font-weight:400;">(${r.org.station}·${r.org.dept})</span>` : ''}`
+    ? `<span style="color:var(--navy);font-weight:700;">🛡 관리자 직접</span> <span style="color:var(--ink-soft);font-weight:400;">${r.org ? `(${r.org.station}·${r.org.dept})` : '(🔑 마스터)'}</span>`
     : `<span style="color:var(--orange);font-weight:700;">👤 민간인 제보</span>`;
   return `
     <div class="req-card">
@@ -2248,7 +2277,7 @@ function doRenderRequestsList(){
     const matchSido = sido==='all' || parts.sido===sido;
     const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
     const matchSource = source==='all' || r.source===source;
-    const matchStation = station==='all' || (r.org && r.org.station===station);
+    const matchStation = station==='all' || (station==='__master__' ? (!r.org && r.source==='admin') : (r.org && r.org.station===station));
     return matchMonth && matchSido && matchSigungu && matchSource && matchStation;
   }).sort((a,b)=>b.submittedAt-a.submittedAt);
 
@@ -2285,7 +2314,7 @@ function doRenderHistoryList(){
     const matchSido = sido==='all' || parts.sido===sido;
     const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
     const matchSource = source==='all' || r.source===source;
-    const matchStation = station==='all' || (r.org && r.org.station===station);
+    const matchStation = station==='all' || (station==='__master__' ? (!r.org && r.source==='admin') : (r.org && r.org.station===station));
     return matchQ && matchMonth && matchSido && matchSigungu && matchSource && matchStation;
   }).sort((a,b)=>b.submittedAt-a.submittedAt);
 
@@ -2644,8 +2673,13 @@ function populateStationFilter(selectId, list){
   if(!sel) return;
   const prev = sel.value || 'all';
   const counts = {};
-  list.forEach(r=>{ if(r.org && r.org.station) counts[r.org.station] = (counts[r.org.station]||0)+1; });
+  let masterCount = 0;
+  list.forEach(r=>{
+    if(r.org && r.org.station) counts[r.org.station] = (counts[r.org.station]||0)+1;
+    else if(r.source==='admin') masterCount++;
+  });
   const opts = [`<option value="all">소속 해양경찰서: 전체</option>`];
+  if(masterCount>0) opts.push(`<option value="__master__">🔑 마스터 (${masterCount}건)</option>`);
   Object.keys(counts).sort().forEach(st=>{
     opts.push(`<option value="${st}">${st} (${counts[st]}건)</option>`);
   });
