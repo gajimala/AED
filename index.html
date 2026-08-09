@@ -118,6 +118,17 @@
   }
   #classifyProgress.show{display:block;}
 
+  #syncStatus{
+    display:none;position:fixed;left:50%;transform:translateX(-50%);
+    bottom:calc(80px + env(safe-area-inset-bottom));z-index:950;
+    background:#12222E;color:#fff;font-size:12.5px;padding:10px 16px;border-radius:24px;
+    box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;display:flex;align-items:center;gap:8px;
+  }
+  #syncStatus.show{display:flex;}
+  #syncStatus .spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin 0.8s linear infinite;flex-shrink:0;}
+  #syncStatus.done{background:#1E8E5A;}
+  #syncStatus.timeout{background:#5B6B76;}
+
   /* ---------- 지도 ---------- */
   #map{position:fixed;inset:0;}
 
@@ -288,6 +299,7 @@
   <button id="aedToggleBtn" onclick="toggleAedLayer()">🚑 AED 표시</button>
 </div>
 <div id="classifyProgress"></div>
+<div id="syncStatus"></div>
 <div id="aedInfoBox"></div>
 
 <button id="myLocationEntry" onclick="goToMyLocation()" title="내 위치로 가기">
@@ -798,7 +810,11 @@ function upsertRecord(rec){
     method: isNew ? 'POST' : 'PUT',
     headers: { 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
     body: JSON.stringify(rec)
-  }).then(res=>{ if(!res.ok) throw new Error('HTTP '+res.status); })
+  }).then(res=>{
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      // 저장 자체는 성공 — 이제 실제 지도(GitHub Pages)에 반영될 때까지 백그라운드로 확인
+      queueSyncCheck(rec.id, isNew?'add':'edit', rec.lat, rec.lng);
+    })
     .catch(e=>{
       console.error('서버 저장 실패', e);
       alert('서버 저장에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면에는 반영됐지만 새로고침하면 사라질 수 있습니다.');
@@ -808,13 +824,86 @@ function upsertRecord(rec){
 function deleteRecord(id){
   _cache = loadRecords().filter(r=>r.id!==id);
   fetch(`${WORKER_URL}/lifesavers/${id}`, { method:'DELETE', headers:{ 'X-Admin-Code': ADMIN_CODE } })
-    .then(res=>{ if(!res.ok) throw new Error('HTTP '+res.status); })
+    .then(res=>{
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      queueSyncCheck(id, 'delete', null, null);
+    })
     .catch(e=>{
       console.error('서버 삭제 실패', e);
       alert('서버 삭제에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요).');
     });
 }
 function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
+
+/* =========================================================
+   지도 반영 대기 표시 — Worker 저장은 성공했지만 GitHub Pages가
+   실제로 다시 빌드/배포되기까지는 몇십 초 정도 걸릴 수 있음.
+   화면에 "대기중"을 보여주고, lifesavers.json을 주기적으로 다시
+   읽어서 실제로 반영된 걸 확인하면 "완료"로 바꿔줌.
+   ========================================================= */
+let _pendingSync = new Map(); // id -> {type:'add'|'edit'|'delete', lat, lng}
+let _syncPollTimer = null;
+let _syncPollStartedAt = 0;
+const SYNC_POLL_INTERVAL_MS = 5000;
+const SYNC_POLL_TIMEOUT_MS = 120000; // 2분 넘으면 포기하고 안내만 바꿔줌
+
+function queueSyncCheck(id, type, lat, lng){
+  _pendingSync.set(id, { type, lat, lng });
+  updateSyncBanner();
+  if(!_syncPollTimer){
+    _syncPollStartedAt = Date.now();
+    _syncPollTimer = setInterval(pollSyncOnce, SYNC_POLL_INTERVAL_MS);
+    pollSyncOnce(); // 첫 확인은 바로
+  }
+}
+
+function updateSyncBanner(){
+  const box = document.getElementById('syncStatus');
+  const n = _pendingSync.size;
+  if(n===0){ return; } // 완료 처리는 pollSyncOnce에서 별도로 함
+  box.className = 'show';
+  box.innerHTML = `<span class="spin"></span> 지도 반영 대기중… (${n}건)`;
+}
+
+async function pollSyncOnce(){
+  if(_pendingSync.size===0){
+    clearInterval(_syncPollTimer); _syncPollTimer = null;
+    return;
+  }
+  if(Date.now() - _syncPollStartedAt > SYNC_POLL_TIMEOUT_MS){
+    const box = document.getElementById('syncStatus');
+    box.className = 'show timeout';
+    box.innerHTML = `⏳ 반영이 예상보다 오래 걸리고 있어요. 잠시 후 새로고침해서 확인해주세요.`;
+    setTimeout(()=>{ box.classList.remove('show'); }, 4000);
+    _pendingSync.clear();
+    clearInterval(_syncPollTimer); _syncPollTimer = null;
+    return;
+  }
+  try{
+    const res = await fetch(`${SEED_JSON_URL}?sync=${Date.now()}`, { cache:'no-store' });
+    if(!res.ok) return;
+    const list = await res.json();
+    const byId = new Map(list.map(r=>[r.id, r]));
+    for(const [id, want] of [..._pendingSync]){
+      const rec = byId.get(id);
+      let done = false;
+      if(want.type === 'delete') done = !rec;
+      else if(rec) done = Math.abs(rec.lat-want.lat) < 0.000001 && Math.abs(rec.lng-want.lng) < 0.000001;
+      if(done) _pendingSync.delete(id);
+    }
+  }catch(e){ console.error('반영 확인 실패', e); return; }
+
+  if(_pendingSync.size===0){
+    const box = document.getElementById('syncStatus');
+    box.className = 'show done';
+    box.innerHTML = `✅ 지도에 반영 완료`;
+    setTimeout(()=>{ box.classList.remove('show'); }, 2500);
+    clearInterval(_syncPollTimer); _syncPollTimer = null;
+  } else {
+    updateSyncBanner();
+  }
+}
+
 
 // 지역/주소 자동채우기처럼 여러 건을 한 번에 고칠 때 — Worker가 커밋 1번으로 처리(대량 커밋 방지)
 async function batchPatchRecords(patches){
@@ -1676,6 +1765,8 @@ function applyApprovedChange(entry, isCivilianAuto){
         const tmp = loadRecords().find(r=>r.__tmp);
         if(tmp){ delete tmp.__tmp; tmp.id = saved.id; }
       }
+      const checkId = entry.type==='add' ? entry.targetId : entry.targetId;
+      queueSyncCheck(checkId, entry.type, entry.newLat, entry.newLng);
     }).catch(e=>{
       console.error('자동승인 반영 실패', e);
       alert('제보는 접수됐지만 즉시 반영에 실패했습니다. 관리자 확인 후 반영됩니다.');
