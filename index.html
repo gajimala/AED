@@ -933,7 +933,9 @@ async function pollSyncOnce(){
       const rec = byId.get(id);
       let done = false;
       if(want.type === 'delete') done = !rec;
-      else if(rec) done = Math.abs(rec.lat-want.lat) < 0.000001 && Math.abs(rec.lng-want.lng) < 0.000001;
+      else if(want.type === 'add') done = !!rec; // 신규는 id가 존재하기만 하면 완료(좌표 미세 반올림 차이로 영원히 대기되는 것 방지)
+      // 수정은 좌표가 "그 방향으로" 바뀐 게 맞는지만 확인(약 10m 오차는 반올림으로 보고 허용)
+      else if(rec) done = Math.abs(rec.lat-want.lat) < 0.0001 && Math.abs(rec.lng-want.lng) < 0.0001;
       if(done) _pendingSync.delete(id);
     }
   }catch(e){ console.error('반영 확인 실패', e); return; }
