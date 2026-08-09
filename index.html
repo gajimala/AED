@@ -852,10 +852,38 @@ let _syncPollTimer = null;
 let _syncPollStartedAt = 0;
 const SYNC_POLL_INTERVAL_MS = 5000;
 const SYNC_POLL_TIMEOUT_MS = 120000; // 2분 넘으면 포기하고 안내만 바꿔줌
+const SYNC_STORAGE_KEY = 'gujohham_pending_sync_v1';
+
+// 새로고침해도 "아직 대기중인 것"을 잊지 않도록 localStorage에 저장해둠
+function persistSyncState(){
+  try{
+    if(_pendingSync.size===0){ localStorage.removeItem(SYNC_STORAGE_KEY); return; }
+    localStorage.setItem(SYNC_STORAGE_KEY, JSON.stringify({
+      startedAt: _syncPollStartedAt,
+      items: [..._pendingSync.entries()]
+    }));
+  }catch(e){ /* 저장 실패해도 치명적이지 않음(그냥 새로고침 시 못 이어감) */ }
+}
+
+// 페이지가 새로 열릴 때, 예전에 대기중이던 게 있으면 이어서 확인 시작
+function resumeSyncStateFromStorage(){
+  try{
+    const raw = localStorage.getItem(SYNC_STORAGE_KEY);
+    if(!raw) return;
+    const saved = JSON.parse(raw);
+    if(!saved.items || !saved.items.length) return;
+    _pendingSync = new Map(saved.items);
+    _syncPollStartedAt = saved.startedAt || Date.now();
+    updateSyncBanner();
+    _syncPollTimer = setInterval(pollSyncOnce, SYNC_POLL_INTERVAL_MS);
+    pollSyncOnce();
+  }catch(e){ console.error('대기중 상태 복원 실패', e); }
+}
 
 function queueSyncCheck(id, type, lat, lng){
   _pendingSync.set(id, { type, lat, lng });
   updateSyncBanner();
+  persistSyncState();
   if(!_syncPollTimer){
     _syncPollStartedAt = Date.now();
     _syncPollTimer = setInterval(pollSyncOnce, SYNC_POLL_INTERVAL_MS);
@@ -892,6 +920,7 @@ async function pollSyncOnce(){
     box.innerHTML = `⏳ 반영이 예상보다 오래 걸리고 있어요. 잠시 후 새로고침해서 확인해주세요.`;
     _syncHideTimer = setTimeout(()=>{ box.classList.remove('show'); }, 4000);
     _pendingSync.clear();
+    persistSyncState();
     clearInterval(_syncPollTimer); _syncPollTimer = null;
     return;
   }
@@ -909,6 +938,7 @@ async function pollSyncOnce(){
     }
   }catch(e){ console.error('반영 확인 실패', e); return; }
 
+  persistSyncState(); // 완료된 항목이 지워졌으니(또는 그대로면) 최신 상태로 다시 저장
   if(_pendingSync.size===0){
     const box = document.getElementById('syncStatus');
     clearTimeout(_syncHideTimer); // 이전에 걸려있던 숨김 타이머가 있으면 취소하고 새로 하나만 설정
@@ -948,6 +978,7 @@ window.addEventListener('load', ()=>{
   ensureLoaded().then(()=>{
     // 대시보드가 이미 열려 있었다면(드문 케이스) 표를 최신 데이터로 갱신
     if(document.getElementById('adminDash').classList.contains('show')) buildBulkEditTable();
+    resumeSyncStateFromStorage(); // 새로고침 전에 "대기중"이던 게 있으면 이어서 확인
   });
 
   // 카카오 SDK 로드가 실패해도(앱키 미설정, 도메인 미등록, 네트워크 문제 등)
