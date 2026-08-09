@@ -392,20 +392,10 @@
   <div class="sheet" style="position:relative;">
     <div class="close-x" onclick="closeCodeOverlay()">✕</div>
     <h2>관리자 모드</h2>
-    <p class="sub">코드 5자리를 입력하세요</p>
+    <p class="sub">관리자 코드를 입력하세요</p>
     <div id="codeDots"><span></span><span></span><span></span><span></span><span></span></div>
     <div class="msg err" id="codeErr" style="display:none;text-align:center;">코드가 올바르지 않습니다</div>
     <div class="keypad" id="keypad"></div>
-  </div>
-</div>
-
-<!-- 관리자 코드 확인 후: 마스터로 바로 시작할지, 소속 선택하고 시작할지 선택 -->
-<div class="overlay center" id="loginTypeOverlay">
-  <div class="sheet" style="position:relative;">
-    <h2>어떻게 시작할까요?</h2>
-    <p class="sub">마스터는 소속 선택 없이 바로 전체 관리 화면으로 들어갑니다</p>
-    <button class="btn btn-navy" onclick="startAsMaster()">🔑 마스터로 시작 (소속 선택 없음)</button>
-    <button class="btn btn-primary" style="margin-top:10px;" onclick="startAsStationAdmin()">🏢 소속 기관 선택하고 시작</button>
   </div>
 </div>
 
@@ -514,22 +504,45 @@
         <div class="step-text"><div class="step-desc">대상자가 구명환을 양팔로 안거나 팔을 끼우게 한 뒤, 천천히 끌어당겨 안전한 곳으로 이동시킵니다.</div></div>
       </div>
 
-      <div class="step-title" style="margin:20px 0 8px;">🦺 구명조끼</div>
+      <div class="step-title" style="margin:20px 0 8px;">🦺 구명조끼 착용법</div>
+      <div class="warn-box" style="background:#EFF6F8;color:var(--navy);">구명조끼는 <b>정확하게 착용해야</b> 제 역할을 합니다. 물에 들어가기 전 아래 6단계를 반드시 확인하세요.</div>
+
       <div class="step-card">
         <div class="step-num">1</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M22 12h20l4 14-6 26H24l-6-26z" fill="none" stroke="#0B3454" stroke-width="3"/><line x1="27" y1="12" x2="27" y2="52" stroke="#0B3454" stroke-width="1.5"/><line x1="37" y1="12" x2="37" y2="52" stroke="#0B3454" stroke-width="1.5"/></svg></div>
-        <div class="step-text"><div class="step-desc">체격에 맞는 사이즈인지 확인합니다. 너무 크면 물에서 위로 벗겨질 수 있습니다.</div></div>
+        <div class="step-icon"><img src="./icon/Edu/vest1.jpg" alt="체격에 맞는 사이즈 확인"></div>
+        <div class="step-text"><div class="step-title">체격에 맞는 사이즈인지 확인</div><div class="step-desc">조끼를 펼쳐서 몸에 대보고 크기를 확인합니다. <b>너무 크면 물에 빠졌을 때 조끼만 위로 벗겨져</b> 얼굴이 물에 잠길 수 있습니다. 어린이는 반드시 체중에 맞는 유아·아동용을 사용하세요.</div></div>
       </div>
+
       <div class="step-card">
         <div class="step-num">2</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><path d="M22 12h20l4 14-6 26H24l-6-26z" fill="none" stroke="#0B3454" stroke-width="3"/><rect x="24" y="30" width="16" height="4" fill="#FF6B35"/><rect x="24" y="40" width="16" height="4" fill="#FF6B35"/></svg></div>
-        <div class="step-text"><div class="step-desc">지퍼(또는 앞여밈)를 잠근 뒤, <b>가슴·허리 스트랩을 전부</b> 채우고 몸에 밀착되도록 바짝 조입니다.</div></div>
+        <div class="step-icon"><img src="./icon/Edu/vest2.jpg" alt="머리 위로 입기"></div>
+        <div class="step-text"><div class="step-title">머리 위로 뒤집어 입기</div><div class="step-desc">앞여밈이 없는 형태는 머리 위로 뒤집어써서 입습니다. 입은 뒤 <b>앞면이 몸 중앙에 잘 맞는지</b>, 목 부분이 턱을 밀어올리지 않는지 확인합니다.</div></div>
       </div>
+
       <div class="step-card">
         <div class="step-num">3</div>
-        <div class="step-icon"><svg viewBox="0 0 64 64"><circle cx="32" cy="14" r="7" fill="none" stroke="#0B3454" stroke-width="2.5"/><path d="M20 24l6-4M44 24l-6-4" stroke="#0B3454" stroke-width="2.5" stroke-linecap="round"/><path d="M32 21v10" stroke="#0B3454" stroke-width="2.5"/></svg></div>
-        <div class="step-text"><div class="step-desc">착용 후 양팔을 위로 들어 당겨봅니다. 조끼가 턱이나 귀까지 밀려 올라오면 스트랩을 더 조여야 합니다.</div></div>
+        <div class="step-icon"><img src="./icon/Edu/vest4.jpg" alt="지퍼 끝까지 잠그기"></div>
+        <div class="step-text"><div class="step-title">지퍼(앞여밈)를 끝까지 잠그기</div><div class="step-desc">지퍼나 버클을 <b>맨 위까지 완전히</b> 채웁니다. 중간까지만 잠그면 물살에 벌어져 조끼가 벗겨질 수 있습니다.</div></div>
       </div>
+
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-icon"><img src="./icon/Edu/vest5.jpg" alt="가슴·허리 스트랩 조이기"></div>
+        <div class="step-text"><div class="step-title">가슴·허리 스트랩 전부 채우고 조이기</div><div class="step-desc">가슴 → 허리 순서로 <b>모든 버클을 채운 뒤</b>, 양쪽 끈을 바깥으로 당겨 몸에 밀착시킵니다. <b>손가락 한두 마디가 들어갈 정도</b>가 적당합니다. 다리끈(밑줄)이 있으면 다리 사이로 통과시켜 아래로 당겨 고정하세요 — 이게 조끼가 위로 벗겨지는 걸 막아줍니다.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">5</div>
+        <div class="step-icon"><img src="./icon/Edu/vest6.jpg" alt="양팔 들어 확인"></div>
+        <div class="step-text"><div class="step-title">양팔을 위로 들어 당겨보기</div><div class="step-desc">착용을 마치면 <b>양팔을 위로 쭉 들어올려</b> 봅니다. 조끼가 제자리에 있으면 정상(OK). <b>턱이나 귀까지 밀려 올라오면 너무 헐거운 것</b>(NG)이니 스트랩을 더 조이고 다시 확인하세요.</div></div>
+      </div>
+
+      <div class="step-card">
+        <div class="step-num">6</div>
+        <div class="step-icon"><img src="./icon/Edu/vest3.jpg" alt="최종 확인"></div>
+        <div class="step-text"><div class="step-title">최종 점검</div><div class="step-desc">✔ 버클이 모두 제대로 잠겼는지<br>✔ 스트랩이 꼬이지 않았는지<br>✔ 몸을 움직여도 조끼가 밀착돼 있는지<br>✔ 다리끈이 편안하게 고정돼 있는지<br>어깨를 눌러봤을 때 <b>귀가 옆으로 눌리지 않고 움직임이 편안</b>하면 올바른 착용입니다.</div></div>
+      </div>
+      <div class="src-box">출처: 해양경찰청 구명조끼 착용법</div>
 
       <div class="step-title" style="margin:20px 0 8px;">🎯 드로우백 (구명로프)</div>
       <div class="step-card">
@@ -742,6 +755,10 @@
    데이터 계층 — GitHub 저장(lifesavers.json) + Cloudflare Worker
    레코드 구조: {id, lat, lng, addr, note, region, updatedAt}
    ========================================================= */
+// 로그인 코드 — 마스터(본인 전용)와 일반 경찰서용을 분리
+const MASTER_CODE  = '1207';   // 마스터: 소속 선택 없이 바로 진입
+const STATION_CODE = '22222';  // 각 경찰서/파출소: 소속 선택 후 진입
+// Worker에 보내는 인증값 — Cloudflare 환경변수 ADMIN_CODE와 반드시 같아야 함(로그인 코드와는 별개)
 const ADMIN_CODE = '22222';
 // ⚠️ Cloudflare Worker 배포 후 실제 주소로 반드시 교체하세요 (worker.js 참고)
 const WORKER_URL = 'https://aed-proxy.gajimala.workers.dev';
@@ -1385,7 +1402,7 @@ function resolveRequestEntry(id, status, newTargetId){
 function deleteRequestEntry(id){
   const code = prompt('삭제하려면 관리자 코드를 입력하세요');
   if(code === null) return; // 취소 누름
-  if(code !== ADMIN_CODE){ alert('코드가 올바르지 않습니다.'); return; }
+  if(code !== MASTER_CODE && code !== STATION_CODE){ alert('코드가 올바르지 않습니다.'); return; }
   if(!confirm('이 이력을 삭제할까요? 되돌릴 수 없습니다.')) return;
 
   // 진행중 표시 — 버튼을 눌렀는데 아무 반응 없어 보이는 상황을 없앰
@@ -2032,17 +2049,11 @@ function onOrgRegionChange(){
   const stationSel = document.getElementById('orgStationSelect');
   stationSel.innerHTML = (ORG_HIERARCHY[region]||[]).map(s=>`<option value="${s}">${s}</option>`).join('');
 }
-// 마스터(본인 전용) — 소속 선택 없이 바로 시작. 이력에는 소속 없이 "마스터 관리자"로 표시됨.
+// 마스터(본인 전용, 코드 1207) — 소속 선택 없이 바로 시작. 이력에는 "🔑 마스터"로 표시됨.
 function startAsMaster(){
-  document.getElementById('loginTypeOverlay').classList.remove('show');
   currentAdminOrg = null;
   updateOrgDisplay();
   finishEnterAdminMode();
-}
-// 소속 기관 담당자 — 소속 선택 화면으로 이동
-function startAsStationAdmin(){
-  document.getElementById('loginTypeOverlay').classList.remove('show');
-  openOrgOverlay();
 }
 function openOrgOverlay(){
   populateOrgSelects();
@@ -2108,11 +2119,20 @@ function onKeypad(n){
   if(codeBuffer.length>=5) return;
   codeBuffer += n;
   renderCodeDots();
+
+  // 마스터 코드(4자리)와 경찰서 코드(5자리)를 둘 다 지원 — 길이가 달라서 각 시점에 확인
+  if(codeBuffer.length===4 && codeBuffer===MASTER_CODE){
+    setTimeout(()=>{
+      closeCodeOverlay();
+      startAsMaster(); // 마스터는 소속 선택 없이 바로 진입
+    }, 150);
+    return;
+  }
   if(codeBuffer.length===5){
     setTimeout(()=>{
-      if(codeBuffer===ADMIN_CODE){
+      if(codeBuffer===STATION_CODE){
         closeCodeOverlay();
-        document.getElementById('loginTypeOverlay').classList.add('show');
+        openOrgOverlay(); // 경찰서 담당자는 소속 선택 필수
       } else {
         document.getElementById('codeErr').style.display='block';
         codeBuffer='';
