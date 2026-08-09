@@ -865,6 +865,8 @@ function updateSyncBanner(){
   box.innerHTML = `<span class="spin"></span> 지도 반영 대기중… (${n}건)`;
 }
 
+let _syncHideTimer = null; // "완료"/"타임아웃" 표시를 없애는 타이머 — 여러 개가 겹쳐 쌓이지 않도록 하나만 추적
+
 async function pollSyncOnce(){
   if(_pendingSync.size===0){
     clearInterval(_syncPollTimer); _syncPollTimer = null;
@@ -872,9 +874,10 @@ async function pollSyncOnce(){
   }
   if(Date.now() - _syncPollStartedAt > SYNC_POLL_TIMEOUT_MS){
     const box = document.getElementById('syncStatus');
+    clearTimeout(_syncHideTimer);
     box.className = 'show timeout';
     box.innerHTML = `⏳ 반영이 예상보다 오래 걸리고 있어요. 잠시 후 새로고침해서 확인해주세요.`;
-    setTimeout(()=>{ box.classList.remove('show'); }, 4000);
+    _syncHideTimer = setTimeout(()=>{ box.classList.remove('show'); }, 4000);
     _pendingSync.clear();
     clearInterval(_syncPollTimer); _syncPollTimer = null;
     return;
@@ -895,11 +898,13 @@ async function pollSyncOnce(){
 
   if(_pendingSync.size===0){
     const box = document.getElementById('syncStatus');
+    clearTimeout(_syncHideTimer); // 이전에 걸려있던 숨김 타이머가 있으면 취소하고 새로 하나만 설정
     box.className = 'show done';
     box.innerHTML = `✅ 지도에 반영 완료`;
-    setTimeout(()=>{ box.classList.remove('show'); }, 2500);
+    _syncHideTimer = setTimeout(()=>{ box.classList.remove('show'); }, 2500);
     clearInterval(_syncPollTimer); _syncPollTimer = null;
   } else {
+    clearTimeout(_syncHideTimer); _syncHideTimer = null; // 아직 남은 게 있으면 숨김 예약을 취소(대기중 표시를 계속 보여줘야 하므로)
     updateSyncBanner();
   }
 }
