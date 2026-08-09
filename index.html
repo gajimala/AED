@@ -122,7 +122,8 @@
     display:none;position:fixed;left:50%;transform:translateX(-50%);
     bottom:calc(80px + env(safe-area-inset-bottom));z-index:950;
     background:#12222E;color:#fff;font-size:12.5px;padding:10px 16px;border-radius:24px;
-    box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;display:flex;align-items:center;gap:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;
+    align-items:center;gap:8px;
   }
   #syncStatus.show{display:flex;}
   #syncStatus .spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin 0.8s linear infinite;flex-shrink:0;}
@@ -843,7 +844,7 @@ function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
 
 /* =========================================================
    저장 완료 표시 — Worker가 저장 성공했다고 응답하면 바로 "완료"를 보여주고
-   2.5초 후 자동으로 사라짐. 실제 지도(GitHub Pages)에 언제 반영되는지까지는
+   1.5초 후 자동으로 사라짐. 실제 지도(GitHub Pages)에 언제 반영되는지까지는
    추적하지 않음 — 그 부분은 몇십 초 정도 걸릴 수 있다는 걸 안내만 함.
    ========================================================= */
 let _syncHideTimer = null; // 여러 번 연달아 떠도 타이머가 안 겹치게 하나만 추적
@@ -855,8 +856,8 @@ function showSyncDone(n){
   clearTimeout(_syncHideTimer);
   box.className = 'show done';
   box.innerHTML = n>1 ? `✅ ${n}건 저장 완료` : `✅ 저장 완료`;
-  _syncHideAt = Date.now() + 2500;
-  _syncHideTimer = setTimeout(hideSyncBoxIfDue, 2500);
+  _syncHideAt = Date.now() + 1500;
+  _syncHideTimer = setTimeout(hideSyncBoxIfDue, 1500);
 }
 function hideSyncBoxIfDue(){
   if(_syncHideAt && Date.now() >= _syncHideAt){
