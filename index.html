@@ -996,7 +996,7 @@ async function initMap(){
   loadAedForCurrentRegion();
 
   // AED를 켜둔 상태에서 지도를 움직이거나 확대/축소하면, 멈췄을 때(idle) 그 위치 기준으로 다시 조회
-  kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) loadAedForCurrentRegion(); });
+  kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) debouncedLoadAed(); });
 }
 
 // 우측 상단 버튼으로 언제든 다시 내 위치로 이동(한 번만, 강제 추적 아님)
@@ -1123,7 +1123,12 @@ async function classifyMissingRegions(){
       await Promise.all(chunk.map(async rec=>{
         const {region, addr} = await coord2RegionAndAddress(rec.lat, rec.lng);
         rec.region = region;
-        if(!rec.addr && addr) rec.addr = addr; // 이미 관리자가 입력해둔 주소는 덮어쓰지 않음
+        if(!rec.addr){
+          // 한 번 조회해서 못 찾으면(바다 위 좌표 등) "주소확인불가"로 못박음 — 빈 값으로 두면
+          // 다음에 또 대상으로 잡혀서 계속 도는 것처럼 보이는 원인이 됨(geocodedAt으로 막고 있긴 하지만,
+          // 화면에도 "확인 중"이 아니라 "확인 못함"이라고 명확히 보여주는 게 사용자 입장에서 덜 헷갈림)
+          rec.addr = addr || '주소확인불가';
+        }
         rec.geocodedAt = Date.now();           // 조회 완료 표시 — 주소가 없는 좌표(바다 위 등)도 다시 조회하지 않음
         pendingPatches.push({ id: rec.id, region: rec.region, addr: rec.addr, geocodedAt: rec.geocodedAt });
       }));
@@ -1181,6 +1186,7 @@ const AED_SERVICE_KEY_ENCODED = 'TUbUhIiFWVRorR5hyktEuzY05oGV0Wd%2FTohPPdjOB27lU
 const AED_API_URL = 'https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire';
 
 let aedState = { on:false, markers:[] };
+let _lastAedBoundsKey = null, _lastAedRegions = null; // 행정구역 조회 결과 캐시(같은 화면범위 재조회 방지)
 
 function toggleAedLayer(){
   aedState.on = !aedState.on;
@@ -1198,6 +1204,15 @@ function clearAedMarkers(){
   document.getElementById('aedInfoBox').classList.remove('show');
 }
 
+let _aedDebounceTimer = null;
+function debouncedLoadAed(){
+  // 지도를 계속 움직이는 중(드래그, 연속 줌)에는 그때마다 매번 재조회하지 않고,
+  // 움직임이 잠깐이라도 멈췄을 때 한 번만 조회 — 안 그러면 짧게 팬만 해도 매번
+  // 카카오 행정구역 조회 5번 + AED 조회가 통째로 다시 도는 낭비가 있었음.
+  clearTimeout(_aedDebounceTimer);
+  _aedDebounceTimer = setTimeout(loadAedForCurrentRegion, 350);
+}
+
 async function loadAedForCurrentRegion(){
   if(!map){
     setAedInfoMsg('⚠️ 지도가 아직 준비되지 않았습니다. 화면 위쪽에 지도 로딩 에러 배너가 떠 있는지 확인해주세요 (카카오 앱키/도메인 등록 문제일 수 있어요).');
@@ -1210,15 +1225,27 @@ async function loadAedForCurrentRegion(){
   const bounds = map.getBounds();
   const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
   const center = map.getCenter();
-  const samplePoints = [
-    center,
-    new kakao.maps.LatLng(sw.getLat(), sw.getLng()),
-    new kakao.maps.LatLng(sw.getLat(), ne.getLng()),
-    new kakao.maps.LatLng(ne.getLat(), sw.getLng()),
-    new kakao.maps.LatLng(ne.getLat(), ne.getLng()),
-  ];
-  const regionResults = await Promise.all(samplePoints.map(p => coord2RegionName(p.getLat(), p.getLng())));
-  const uniqueRegions = [...new Set(regionResults.filter(r => r && r !== '기타'))];
+
+  // ⚠️ 카카오 좌표→행정구역 조회(5곳) 자체가 매번 몇백ms씩 걸려서, 같은 지역을 다시 봐도
+  // 매번 이 조회부터 다시 하는 게 체감 속도 저하의 큰 원인이었음. 화면 범위를 적당히
+  // 반올림한 값으로 캐시해서, 거의 같은 위치/줌이면 이 단계 자체를 건너뜀.
+  const boundsKey = [sw.getLat(),sw.getLng(),ne.getLat(),ne.getLng()].map(v=>v.toFixed(3)).join(',');
+  let uniqueRegions;
+  if(_lastAedBoundsKey === boundsKey && _lastAedRegions){
+    uniqueRegions = _lastAedRegions;
+  } else {
+    const samplePoints = [
+      center,
+      new kakao.maps.LatLng(sw.getLat(), sw.getLng()),
+      new kakao.maps.LatLng(sw.getLat(), ne.getLng()),
+      new kakao.maps.LatLng(ne.getLat(), sw.getLng()),
+      new kakao.maps.LatLng(ne.getLat(), ne.getLng()),
+    ];
+    const regionResults = await Promise.all(samplePoints.map(p => coord2RegionName(p.getLat(), p.getLng())));
+    uniqueRegions = [...new Set(regionResults.filter(r => r && r !== '기타'))];
+    _lastAedBoundsKey = boundsKey;
+    _lastAedRegions = uniqueRegions;
+  }
 
   if(!uniqueRegions.length){
     setAedInfoMsg('⚠️ 현재 지도 위치의 행정구역을 확인하지 못했습니다. 지도를 조금 이동한 뒤 다시 시도해주세요.');
@@ -1238,26 +1265,65 @@ function setAedInfoMsg(html){
 async function fetchAedMulti(regionPairs){
   clearAedMarkers();
   try{
-    const resultsPerRegion = await Promise.all(regionPairs.map(([sido, sigungu]) => fetchAedOneRegion(sido, sigungu)));
-    const merged = new Map();
-    resultsPerRegion.flat().forEach(item => merged.set(`${item.name}|${item.lat}|${item.lng}`, item)); // 좌표+이름으로 중복 제거
-    const items = [...merged.values()];
-    if(!items.length){
-      setAedInfoMsg(`이 지역에서 AED 데이터를 찾지 못했습니다.`);
+    // 1단계: 캐시가 있는 지역은 즉시 그걸로 먼저 보여줌(체감 속도 개선 — 전국 단위로 봐도 안 버벅임)
+    const cachedPerRegion = regionPairs.map(([sido, sigungu]) => readAedCache(sido, sigungu));
+    const hasAnyCache = cachedPerRegion.some(c => c !== null);
+    if(hasAnyCache){
+      renderAedItems(mergeAedItems(cachedPerRegion.map(c => c ? c.items : [])));
+    }
+
+    // 2단계: 실제 최신 데이터를 백그라운드로 조회해서, 캐시와 다르면(정부 데이터가 바뀐 경우)
+    // 화면을 조용히 최신 내용으로 갱신함. 캐시가 없던 지역(첫 조회)은 이 단계를 반드시 기다림.
+    const freshPerRegion = await Promise.all(regionPairs.map(([sido, sigungu]) => fetchAedFresh(sido, sigungu)));
+    const freshMerged = mergeAedItems(freshPerRegion);
+    const cachedMerged = hasAnyCache ? mergeAedItems(cachedPerRegion.map(c => c ? c.items : [])) : null;
+    const changed = !cachedMerged || JSON.stringify(freshMerged) !== JSON.stringify(cachedMerged);
+
+    if(!freshMerged.length){
+      if(!hasAnyCache) setAedInfoMsg(`이 지역에서 AED 데이터를 찾지 못했습니다.`);
       return;
     }
-    closeAedInfo(); // 마커가 여러 개 뜨는 정상 케이스면 안내 박스는 닫아서 지도를 가리지 않게 함
-    items.forEach(item=>renderAedMarker(item));
+    if(changed || !hasAnyCache){
+      renderAedItems(freshMerged); // 최신 데이터로 다시 그림(달라진 경우만 — 같으면 화면 안 건드려서 깜빡임 없음)
+    }
+    if(!hasAnyCache) closeAedInfo();
   }catch(e){
     console.error('AED 조회 실패', e);
     setAedInfoMsg('AED 정보를 불러오지 못했습니다. (원인: 앱키 미설정, 또는 이 API가 브라우저 직접호출을 막는 CORS 정책일 수 있음)');
   }
 }
 
+function mergeAedItems(resultsPerRegion){
+  const merged = new Map();
+  resultsPerRegion.flat().forEach(item => merged.set(`${item.name}|${item.lat}|${item.lng}`, item)); // 좌표+이름으로 중복 제거
+  return [...merged.values()];
+}
+function renderAedItems(items){
+  clearAedMarkers();
+  if(!items.length) return;
+  closeAedInfo(); // 마커가 여러 개 뜨는 정상 케이스면 안내 박스는 닫아서 지도를 가리지 않게 함
+  items.forEach(item=>renderAedMarker(item));
+}
+
 // 한 행정구역(시/군/구)의 AED를 전부 가져옴 — ⚠️ 예전엔 pageNo=1, numOfRows=100 딱 1번만 요청해서
 // 한 지역에 AED가 100개를 넘으면 101번째부터는 통째로 누락됐음. 이제 totalCount를 확인해서
 // 남은 페이지가 있으면 끝까지(최대 안전장치 10페이지=1,000건) 반복 요청함.
-async function fetchAedOneRegion(sido, sigungu){
+const AED_CACHE_PREFIX = 'aed_cache_v1_';
+const AED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 이 시간이 지나면 캐시를 아예 안 믿고 새로 받아옴(만약을 위한 안전장치)
+
+// 캐시만 읽음(네트워크 요청 없음, 즉시 반환) — 없거나 너무 오래됐으면 null
+function readAedCache(sido, sigungu){
+  try{
+    const cached = JSON.parse(localStorage.getItem(AED_CACHE_PREFIX + sido + '_' + sigungu));
+    if(cached && Date.now() - cached.fetchedAt < AED_CACHE_TTL_MS) return cached;
+  }catch(e){}
+  return null;
+}
+
+// 한 행정구역(시/군/구)의 AED를 실제로 서버에서 가져옴(항상 최신) — ⚠️ 예전엔 pageNo=1, numOfRows=100
+// 딱 1번만 요청해서 한 지역에 AED가 100개를 넘으면 101번째부터는 통째로 누락됐음. 이제 totalCount를
+// 확인해서 남은 페이지가 있으면 끝까지(최대 안전장치 10페이지=1,000건) 반복 요청함.
+async function fetchAedFresh(sido, sigungu){
   const PAGE_SIZE = 100, MAX_PAGES = 10;
   let all = [];
   for(let pageNo=1; pageNo<=MAX_PAGES; pageNo++){
@@ -1271,6 +1337,8 @@ async function fetchAedOneRegion(sido, sigungu){
     all = all.concat(items);
     if(all.length >= totalCount || items.length < PAGE_SIZE) break; // 더 가져올 게 없으면 중단
   }
+  try{ localStorage.setItem(AED_CACHE_PREFIX + sido + '_' + sigungu, JSON.stringify({ fetchedAt: Date.now(), items: all })); }
+  catch(e){ console.warn('AED 캐시 저장 실패(용량 초과 등) — 다음에도 다시 조회됨', e); }
   return all;
 }
 function parseAedXml(xmlText){
