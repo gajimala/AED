@@ -1123,7 +1123,12 @@ async function classifyMissingRegions(){
       await Promise.all(chunk.map(async rec=>{
         const {region, addr} = await coord2RegionAndAddress(rec.lat, rec.lng);
         rec.region = region;
-        if(!rec.addr && addr) rec.addr = addr; // 이미 관리자가 입력해둔 주소는 덮어쓰지 않음
+        if(!rec.addr){
+          // 한 번 조회해서 못 찾으면(바다 위 좌표 등) "주소확인불가"로 못박음 — 빈 값으로 두면
+          // 다음에 또 대상으로 잡혀서 계속 도는 것처럼 보이는 원인이 됨(geocodedAt으로 막고 있긴 하지만,
+          // 화면에도 "확인 중"이 아니라 "확인 못함"이라고 명확히 보여주는 게 사용자 입장에서 덜 헷갈림)
+          rec.addr = addr || '주소확인불가';
+        }
         rec.geocodedAt = Date.now();           // 조회 완료 표시 — 주소가 없는 좌표(바다 위 등)도 다시 조회하지 않음
         pendingPatches.push({ id: rec.id, region: rec.region, addr: rec.addr, geocodedAt: rec.geocodedAt });
       }));
