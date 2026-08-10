@@ -1204,15 +1204,28 @@ async function loadAedForCurrentRegion(){
     return;
   }
   setAedInfoMsg('📡 이 지역 AED 정보를 불러오는 중…');
-  // 지도 중심 좌표를 카카오 좌표→행정구역 API로 시도/시군구 이름을 얻어서 AED 조회에 사용
+  // ⚠️ 예전엔 "지도 중심 좌표 딱 1곳"의 행정구역만 조회해서, 화면에 두 개 시/군/구가
+  // 걸쳐 보이는 경계 지역에서는 절반의 AED가 누락되는 문제가 있었음. 이제 화면에 실제로
+  // 보이는 범위(모서리 4곳 + 중심)를 전부 표본으로 확인해서, 걸쳐있는 행정구역을 다 조회함.
+  const bounds = map.getBounds();
+  const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
   const center = map.getCenter();
-  const regionName = await coord2RegionName(center.getLat(), center.getLng());
-  if(!regionName || regionName==='기타'){
+  const samplePoints = [
+    center,
+    new kakao.maps.LatLng(sw.getLat(), sw.getLng()),
+    new kakao.maps.LatLng(sw.getLat(), ne.getLng()),
+    new kakao.maps.LatLng(ne.getLat(), sw.getLng()),
+    new kakao.maps.LatLng(ne.getLat(), ne.getLng()),
+  ];
+  const regionResults = await Promise.all(samplePoints.map(p => coord2RegionName(p.getLat(), p.getLng())));
+  const uniqueRegions = [...new Set(regionResults.filter(r => r && r !== '기타'))];
+
+  if(!uniqueRegions.length){
     setAedInfoMsg('⚠️ 현재 지도 위치의 행정구역을 확인하지 못했습니다. 지도를 조금 이동한 뒤 다시 시도해주세요.');
     return;
   }
-  const [sido, sigungu] = regionName.split(' ');
-  fetchAed(sido, sigungu);
+  const regionPairs = uniqueRegions.map(r => r.split(' '));
+  fetchAedMulti(regionPairs);
 }
 
 function setAedInfoMsg(html){
@@ -1221,35 +1234,50 @@ function setAedInfoMsg(html){
   box.innerHTML = `<button id="aedInfoClose" onclick="closeAedInfo()">✕</button><div style="padding-right:20px;">${html}</div>`;
 }
 
-async function fetchAed(sido, sigungu){
+// 화면에 걸친 행정구역이 여러 개면 전부 조회해서 합침(중복 제거)
+async function fetchAedMulti(regionPairs){
   clearAedMarkers();
   try{
-    // serviceKey는 이미 인코딩돼 있으므로 문자열로 직접 붙이고, 나머지 값만 encodeURIComponent 처리
-    const url = `${AED_API_URL}?serviceKey=${AED_SERVICE_KEY_ENCODED}`
-      + `&Q0=${encodeURIComponent(sido)}&Q1=${encodeURIComponent(sigungu)}`
-      + `&pageNo=1&numOfRows=100`;
-    const res = await fetch(url);
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    const text = await res.text();
-    const items = parseAedXml(text);
+    const resultsPerRegion = await Promise.all(regionPairs.map(([sido, sigungu]) => fetchAedOneRegion(sido, sigungu)));
+    const merged = new Map();
+    resultsPerRegion.flat().forEach(item => merged.set(`${item.name}|${item.lat}|${item.lng}`, item)); // 좌표+이름으로 중복 제거
+    const items = [...merged.values()];
     if(!items.length){
-      setAedInfoMsg(`<b>${sido} ${sigungu}</b> 지역에서 AED 데이터를 찾지 못했습니다.`);
+      setAedInfoMsg(`이 지역에서 AED 데이터를 찾지 못했습니다.`);
       return;
     }
     closeAedInfo(); // 마커가 여러 개 뜨는 정상 케이스면 안내 박스는 닫아서 지도를 가리지 않게 함
     items.forEach(item=>renderAedMarker(item));
   }catch(e){
     console.error('AED 조회 실패', e);
-    // CORS 차단이면 브라우저 콘솔에 "has been blocked by CORS policy" 메시지가 뜸 — 그 경우 프록시 필요
     setAedInfoMsg('AED 정보를 불러오지 못했습니다. (원인: 앱키 미설정, 또는 이 API가 브라우저 직접호출을 막는 CORS 정책일 수 있음)');
   }
 }
 
-// TODO: 응답 필드명(buildPlace, buildAddress, wgs84Lat/Lon, tel 등)도 실제 응답 확인 후 확정
+// 한 행정구역(시/군/구)의 AED를 전부 가져옴 — ⚠️ 예전엔 pageNo=1, numOfRows=100 딱 1번만 요청해서
+// 한 지역에 AED가 100개를 넘으면 101번째부터는 통째로 누락됐음. 이제 totalCount를 확인해서
+// 남은 페이지가 있으면 끝까지(최대 안전장치 10페이지=1,000건) 반복 요청함.
+async function fetchAedOneRegion(sido, sigungu){
+  const PAGE_SIZE = 100, MAX_PAGES = 10;
+  let all = [];
+  for(let pageNo=1; pageNo<=MAX_PAGES; pageNo++){
+    const url = `${AED_API_URL}?serviceKey=${AED_SERVICE_KEY_ENCODED}`
+      + `&Q0=${encodeURIComponent(sido)}&Q1=${encodeURIComponent(sigungu)}`
+      + `&pageNo=${pageNo}&numOfRows=${PAGE_SIZE}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const { items, totalCount } = parseAedXml(text);
+    all = all.concat(items);
+    if(all.length >= totalCount || items.length < PAGE_SIZE) break; // 더 가져올 게 없으면 중단
+  }
+  return all;
+}
 function parseAedXml(xmlText){
   const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
   const nodes = Array.from(doc.querySelectorAll('item'));
-  return nodes.map(n=>{
+  const totalCount = parseInt(doc.querySelector('totalCount')?.textContent || '0', 10);
+  const items = nodes.map(n=>{
     const g = tag => n.querySelector(tag)?.textContent || '';
     return {
       name: g('org') || '이름 미상',           // 설치기관명 (예: 동북아무역센터)
@@ -1271,6 +1299,7 @@ function parseAedXml(xmlText){
       holStart:g('holSttTme'), holEnd:g('holEndTme')
     };
   }).filter(a=>!isNaN(a.lat) && !isNaN(a.lng));
+  return { items, totalCount };
 }
 
 // 운영시간 정보를 바탕으로 "지금 이용 가능한지" 계산 (필드명 확정되면 그대로 동작)
