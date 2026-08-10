@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AED 지역명 비교 테스트</title>
+<style>
+  body{font-family:-apple-system,sans-serif;padding:16px;background:#F4F7FA;color:#12222E;}
+  h1{font-size:17px;}
+  button{background:#0FA3B1;color:#fff;border:none;border-radius:8px;padding:14px 20px;font-size:15px;font-weight:700;width:100%;margin-bottom:16px;}
+  .card{background:#fff;border:1px solid #E1E8ED;border-radius:10px;padding:14px;margin-bottom:12px;}
+  .num{font-size:28px;font-weight:800;color:#0B3454;}
+  .label{font-size:12px;color:#5B6B76;margin-bottom:4px;}
+  .win{background:#E7F7EE;border-color:#1E8E5A;}
+  .err{color:#E4572E;font-size:13px;}
+</style>
+</head>
+<body>
+
+<h1>🔍 강원도 vs 강원특별자치도 — AED 데이터 비교</h1>
+<p style="font-size:13px;color:#5B6B76;">버튼 누르면 두 이름으로 각각 강릉시 AED를 조회해서 결과를 비교합니다.</p>
+<button onclick="runTest()">지금 비교하기</button>
+<div id="result"></div>
+
+<script>
+const KEY = 'TUbUhIiFWVRorR5hyktEuzY05oGV0Wd%2FTohPPdjOB27lUHRN521Oc6cJD%2BityxwoJzleTCzC%2BBYOroBVoyOxhA%3D%3D';
+const BASE = 'https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire';
+
+async function tryRegion(sido, sigungu){
+  const url = `${BASE}?serviceKey=${KEY}&Q0=${encodeURIComponent(sido)}&Q1=${encodeURIComponent(sigungu)}&pageNo=1&numOfRows=100`;
+  try{
+    const res = await fetch(url);
+    const text = await res.text();
+    const doc = new DOMParser().parseFromString(text, 'text/xml');
+    const totalCount = doc.querySelector('totalCount')?.textContent;
+    const errMsg = doc.querySelector('returnAuthMsg')?.textContent;
+    const itemCount = doc.querySelectorAll('item').length;
+    return { ok: res.ok, totalCount, itemCount, errMsg, status: res.status };
+  }catch(e){
+    return { ok:false, error: e.message };
+  }
+}
+
+async function runTest(){
+  const box = document.getElementById('result');
+  box.innerHTML = '⏳ 조회 중...';
+  const [newName, oldName] = await Promise.all([
+    tryRegion('강원특별자치도', '강릉시'),
+    tryRegion('강원도', '강릉시'),
+  ]);
+
+  function render(title, r){
+    if(!r.ok && r.error) return `<div class="card"><div class="label">${title}</div><div class="err">요청 실패: ${r.error}</div></div>`;
+    if(r.errMsg) return `<div class="card"><div class="label">${title}</div><div class="err">API 오류: ${r.errMsg} (HTTP ${r.status})</div></div>`;
+    return `<div class="card"><div class="label">${title}</div><div class="num">${r.totalCount ?? '?'}건</div><div style="font-size:12px;color:#5B6B76;">이번 페이지에 담긴 항목: ${r.itemCount}개</div></div>`;
+  }
+
+  box.innerHTML =
+    render('"강원특별자치도"로 조회', newName) +
+    render('"강원도"(옛 이름)로 조회', oldName) +
+    `<div class="card" style="background:#FFF7E6;border-color:#FF6B35;">
+       <b>결론</b>: 숫자가 서로 다르면(특히 하나가 0이면) 이름 표기 차이가 원인 맞음 — 더 많이 나오는 쪽 이름을 코드에서 쓰면 됩니다.
+     </div>`;
+}
+</script>
+</body>
+</html>
