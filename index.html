@@ -1227,7 +1227,9 @@ async function loadAedForCurrentRegion(){
     setAedInfoMsg('⚠️ 지도가 아직 준비되지 않았습니다. 화면 위쪽에 지도 로딩 에러 배너가 떠 있는지 확인해주세요 (카카오 앱키/도메인 등록 문제일 수 있어요).');
     return;
   }
-  setAedInfoMsg('📡 이 지역 AED 정보를 불러오는 중…');
+  // ⚠️ 예전엔 여기서 매번 "불러오는 중…" 안내상자를 띄웠는데, 캐시가 있어서 사실상 즉시 뜨는
+  // 경우에도 상자가 반짝 나타났다가 제대로 안 닫히는 경우가 있어서 화면이 깜빡이는 것처럼
+  // 보였음. 이제 이 메시지는 fetchAedMulti 안에서 "정말 보여줄 게 아직 없을 때만" 띄움.
   // ⚠️ 예전엔 "지도 중심 좌표 딱 1곳"의 행정구역만 조회해서, 화면에 두 개 시/군/구가
   // 걸쳐 보이는 경계 지역에서는 절반의 AED가 누락되는 문제가 있었음. 이제 화면에 실제로
   // 보이는 범위(모서리 4곳 + 중심)를 전부 표본으로 확인해서, 걸쳐있는 행정구역을 다 조회함.
@@ -1278,6 +1280,9 @@ async function fetchAedMulti(regionPairs){
     const hasAnyCache = cachedPerRegion.some(c => c !== null);
     if(hasAnyCache){
       renderAedItems(mergeAedItems(cachedPerRegion.map(c => c ? c.items : [])));
+      closeAedInfo(); // 캐시로 이미 화면에 뭔가 떠 있으니 "불러오는 중" 문구는 필요 없음(안내상자가 안 닫혀서 깜빡이던 원인)
+    } else {
+      setAedInfoMsg('📡 이 지역 AED 정보를 불러오는 중…'); // 정말 보여줄 게 아직 없을 때만 안내
     }
 
     // 2단계: 실제 최신 데이터를 백그라운드로 조회해서, 캐시와 다르면(정부 데이터가 바뀐 경우)
@@ -1290,7 +1295,7 @@ async function fetchAedMulti(regionPairs){
       return;
     }
     renderAedItems(freshMerged); // renderAedItems 내부에서 "지금 화면과 완전히 같으면" 아예 다시 안 그려서 깜빡임 없음
-    if(!hasAnyCache) closeAedInfo();
+    closeAedInfo(); // 데이터가 있으면(캐시였든 방금 새로 받았든) 안내상자는 항상 닫아둠
   }catch(e){
     console.error('AED 조회 실패', e);
     setAedInfoMsg('AED 정보를 불러오지 못했습니다. (원인: 앱키 미설정, 또는 이 API가 브라우저 직접호출을 막는 CORS 정책일 수 있음)');
