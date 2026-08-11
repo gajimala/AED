@@ -273,8 +273,47 @@
   .step-text .step-desc{font-size:12.5px;color:var(--ink-soft);line-height:1.55;}
   .warn-box{background:#FDEDEA;color:var(--danger);border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:12px;line-height:1.5;}
   .src-box{font-size:11px;color:var(--ink-soft);text-align:right;margin-top:6px;}
-  #metroBtn{width:100%;background:var(--teal);color:#fff;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;margin-bottom:14px;cursor:pointer;}
-  #metroBtn.playing{background:var(--danger);}
+
+  /* ---------- 안전교육 카드뷰어(한 장씩 넘기기) + CPR 실행모드 ---------- */
+  .ev-panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;min-height:340px;display:flex;flex-direction:column;}
+  .ev-img{width:100%;height:auto;max-height:320px;object-fit:contain;border-radius:12px;margin-bottom:12px;border:1px solid var(--line);background:#fff;display:block;}
+  .ev-badge{align-self:center;font-size:13px;font-weight:700;padding:5px 14px;border-radius:20px;margin-bottom:10px;background:#EFF6F8;color:var(--navy);}
+  .ev-badge.breath{background:#E7F7EE;color:#1E8E5A;}
+  .ev-title{font-size:16px;font-weight:800;text-align:center;margin:2px 0 6px;}
+  .ev-desc{font-size:13.5px;color:var(--ink-soft);line-height:1.6;text-align:center;}
+  .ev-nav{display:flex;gap:8px;margin-top:10px;}
+  .ev-nav button{flex:1;border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:13px 10px;font-size:14px;font-weight:700;color:var(--ink);cursor:pointer;}
+  .ev-nav button:disabled{opacity:.4;}
+  .ev-nav button.primary{border-color:var(--teal);color:var(--teal);}
+  .ev-bignum{text-align:center;font-size:50px;font-weight:800;color:var(--navy);line-height:1;}
+  .ev-biglabel{text-align:center;font-size:13px;color:var(--ink-soft);margin-top:2px;}
+  .ev-dots{display:flex;gap:4px;justify-content:center;margin:10px 0 12px;flex-wrap:wrap;}
+  .ev-dot{width:9px;height:9px;border-radius:50%;background:var(--line);}
+  .ev-dot.on{background:var(--teal);}
+  .ev-dot.on.breath{background:#1E8E5A;}
+  .ev-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;background:var(--bg);border-radius:10px;padding:10px 4px;margin-top:auto;}
+  .ev-stat{text-align:center;border-right:1px solid var(--line);}
+  .ev-stat:last-child{border-right:none;}
+  .ev-stat .l{font-size:10.5px;color:var(--ink-soft);}
+  .ev-stat .v{font-size:15px;font-weight:800;margin-top:2px;}
+  .ev-shockbtn{width:100%;margin-top:8px;border:1.5px solid var(--danger);color:var(--danger);background:#fff;border-radius:10px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;}
+  .ev-sternum{margin-top:10px;padding:10px;background:#FFF7E6;border:1px solid #FFD8A8;border-radius:12px;}
+  .ev-sternum img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
+  .ev-sternum span{font-size:13px;color:var(--ink);font-weight:700;line-height:1.4;display:block;text-align:center;}
+  .ev-voice{text-align:center;font-size:11.5px;color:var(--ink-soft);margin-top:8px;}
+  .ev-summary{margin-top:10px;padding:10px 12px;background:#EFF6F8;border-radius:10px;}
+  .ev-summary .t{font-size:12px;color:var(--navy);font-weight:700;margin-bottom:4px;}
+  .ev-summary .v{font-size:12.5px;color:var(--navy);line-height:1.6;}
+  .ev-confirm-overlay{display:none;position:fixed;inset:0;background:rgba(8,20,30,.5);align-items:center;justify-content:center;z-index:950;}
+  .ev-confirm-overlay.show{display:flex;}
+  .ev-confirm{background:#fff;border-radius:14px;padding:18px;max-width:320px;width:88%;}
+  .ev-confirm p.t2{font-size:15px;font-weight:700;margin:0 0 6px;}
+  .ev-confirm p.d2{font-size:13px;color:var(--ink-soft);margin:0 0 14px;line-height:1.5;}
+  .ev-confirm .ev-nav button{flex:1;}
+  .ev-subtab{display:flex;gap:6px;margin:12px 0;}
+  .ev-subtab-item{flex:1;text-align:center;padding:9px 2px;border-radius:9px;font-size:12.5px;font-weight:700;
+    border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);cursor:pointer;}
+  .ev-subtab-item.active{border-color:var(--teal);color:var(--teal);background:#EFF6F8;}
 
 </style>
 </head>
@@ -442,179 +481,84 @@
 
     <!-- 심폐소생술 -->
     <div class="edu-section active" id="edu-cpr">
-      <button id="metroBtn" onclick="toggleMetronome()">🔊 압박 속도 메트로놈 재생 (분당 100회, 30:2 안내 포함)</button>
-
-      <div class="step-card">
-        <div class="step-num">1</div>
-                <div class="step-icon"><img src="./icon/Edu/cpr1.jpg" alt="반응 확인"></div>
-        <div class="step-text"><div class="step-title">반응 확인</div><div class="step-desc">어깨를 가볍게 두드리며 "괜찮으세요?" 라고 크게 물어봅니다. 반응이 없으면 심장정지를 의심합니다.</div></div>
+      <div id="cprStepPanel"></div>
+      <div class="ev-nav" id="cprStepNav">
+        <button id="cprPrevBtn">이전</button>
+        <button class="primary" id="cprNextBtn">다음</button>
       </div>
 
-      <div class="step-card">
-        <div class="step-num">2</div>
-                <div class="step-icon"><img src="./icon/Edu/cpr2.jpg" alt="119 신고"></div>
-        <div class="step-text"><div class="step-title">119 신고 + AED 요청 (호흡 확인보다 먼저)</div><div class="step-desc">일반인은 호흡 상태 판단이 어려우므로, 반응이 없으면 <b>호흡을 확인하기 전에 즉시 119에 신고</b>합니다. 스피커폰을 켜고 구급상황요원의 안내를 따르세요. 주변에 사람이 있으면 신고와 AED 요청을 나눠서 부탁합니다.</div></div>
+      <!-- CPR 실행모드(압박·인공호흡·제세동 통합화면) -->
+      <div id="cprExecArea" style="display:none;">
+        <div class="ev-panel">
+          <div id="cprPhaseBadge" class="ev-badge">가슴압박 중</div>
+          <img id="cprPhaseImg" class="ev-img" src="" alt="">
+          <div class="ev-bignum" id="cprBigNum">1</div>
+          <div class="ev-biglabel" id="cprBigLabel">/ 30회</div>
+          <div class="ev-dots" id="cprDots"></div>
+          <div class="ev-stats">
+            <div class="ev-stat"><div class="l">경과시간</div><div class="v" id="cprElapsed">00:00</div></div>
+            <div class="ev-stat"><div class="l">완료주기·현재</div><div class="v" id="cprCycleCount" style="font-size:12.5px;">1</div></div>
+            <div class="ev-stat"><div class="l">제세동</div><div class="v" id="cprShockCount">0회</div></div>
+          </div>
+        </div>
+        <button class="ev-nav-full primary" id="cprStartGateBtn" style="display:none;width:100%;margin-top:10px;border:1.5px solid var(--teal);color:var(--teal);background:#fff;border-radius:10px;padding:13px;font-size:14px;font-weight:700;">▶ 압박 시작</button>
+        <div class="ev-nav" id="cprRunningControls">
+          <button id="cprPauseBtn">⏸ 정지</button>
+          <button id="cprCloseBtn">✕ 종료</button>
+        </div>
+        <button class="ev-shockbtn" id="cprShockBtn">⚡ 제세동 시행함 (새 주기로 시작)</button>
+        <div class="ev-sternum">
+          <img id="cprSternumImg" src="./icon/Edu/cpr_sternum.jpg" alt="복장뼈 위치">
+          <span>압박 위치 — 복장뼈 아래쪽 절반</span>
+        </div>
+        <div class="ev-voice" id="cprVoiceStatus"></div>
+        <div class="ev-summary">
+          <div class="t">구급대 인계용 요약</div>
+          <div class="v" id="cprSummary"></div>
+        </div>
       </div>
 
-      <div class="step-card">
-        <div class="step-num">3</div>
-                <div class="step-icon"><img src="./icon/Edu/cpr3.jpg" alt="호흡 확인"></div>
-        <div class="step-text"><div class="step-title">호흡 확인 (구급상황요원과 함께)</div><div class="step-desc">숨을 쉬는지, 정상 호흡인지 확인합니다. 숨을 안 쉬거나, 헐떡이는 비정상 호흡(심장정지 호흡)이면 심장정지로 판단하고 즉시 가슴압박을 시작합니다.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">4</div>
-                <div class="step-icon"><img src="./icon/Edu/cpr4.jpg" alt="가슴압박 자세"></div>
-        <div class="step-text"><div class="step-title">가슴압박 — 위치와 자세</div><div class="step-desc"><b>복장뼈(가슴뼈) 아래쪽 절반</b> 지점에 한 손 손꿈치를 대고, 다른 손을 그 위에 겹쳐 깍지를 낍니다. 팔꿈치를 곧게 펴고 체중을 실어 수직으로 압박합니다. 주로 쓰는 손이 아래로 가는 것이 좋습니다.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">5</div>
-                <div class="step-icon"><img src="./icon/Edu/cpr5.jpg" alt="압박 속도 깊이"></div>
-        <div class="step-text"><div class="step-title">압박 속도 · 깊이</div><div class="step-desc"><b>분당 100~120회</b> 속도로, <b>약 5cm 깊이</b>(6cm는 넘지 않게)로 압박합니다. 매번 압박 후에는 가슴이 완전히 원래대로 올라오도록 힘을 뺍니다(이완). 위 메트로놈 버튼으로 속도를 맞춰볼 수 있습니다. 2분마다 압박하는 사람을 교대하면 좋습니다.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">6</div>
-                <div class="step-icon"><img src="./icon/Edu/cpr6.jpg" alt="인공호흡"></div>
-        <div class="step-text"><div class="step-title">인공호흡 (교육받았고 할 수 있으면)</div><div class="step-desc">가슴압박 30회 : 인공호흡 2회 비율로 반복합니다. 머리를 뒤로 젖히고 턱을 들어 기도를 연 뒤, 1초간 가슴이 올라올 정도로 불어넣습니다. <b>인공호흡을 못하거나 꺼려지면 압박만 계속</b>해도 괜찮습니다(가슴압박소생술) — 아무것도 안 하는 것보다 훨씬 낫습니다.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">7</div>
-                <div class="step-icon"><img src="./icon/Edu/cpr7.jpg" alt="AED 사용 및 반복"></div>
-        <div class="step-text"><div class="step-title">AED 도착 즉시 사용 + 반복</div><div class="step-desc">AED가 도착하면 즉시 사용합니다(사용법은 옆 탭). 구급대가 도착하거나, 환자가 움직이거나, 정상적으로 숨을 쉴 때까지 압박과 인공호흡을 반복합니다.</div></div>
-      </div>
-
-      <div class="warn-box">환자가 반응은 없지만 정상적으로 숨을 쉬고 있다면, 옆으로 눕혀 기도가 막히지 않게 하는 <b>회복 자세</b>를 취해주고 구급대를 기다립니다.</div>
+      <div class="warn-box" style="margin-top:14px;">환자가 반응은 없지만 정상적으로 숨을 쉬고 있다면, 옆으로 눕혀 기도가 막히지 않게 하는 <b>회복 자세</b>를 취해주고 구급대를 기다립니다.</div>
       <div class="src-box">출처: 2025년 한국 심폐소생술 가이드라인 (질병관리청·대한심폐소생협회)</div>
     </div>
 
     <!-- 구조장비 사용법 -->
     <div class="edu-section" id="edu-gear">
       <div class="warn-box">⚠️ 어떤 상황에서도 <b>구조자 본인이 직접 물에 뛰어드는 것은 최후의 수단</b>입니다. "도구를 이용해 닿기(Reach) → 던지기(Throw) → (배가 있으면) 저어가기(Row) → 직접 들어가기(Go)" 순서로 시도하세요.</div>
-
-      <div class="step-title" style="margin:14px 0 8px;">🛟 구명환</div>
-      <div class="step-card">
-        <div class="step-num">1</div>
-                <div class="step-icon"><img src="./icon/Edu/ring1.jpg" alt="구명환 꺼내기"></div>
-        <div class="step-text"><div class="step-desc">발견 즉시 큰소리로 주변에 알리고 119에 신고합니다.</div></div>
+      <div class="ev-subtab" id="gearSubtab">
+        <div class="ev-subtab-item" data-i="0">🛟 구명환</div>
+        <div class="ev-subtab-item" data-i="4">🦺 구명조끼</div>
+        <div class="ev-subtab-item" data-i="11">🎯 드로우백</div>
       </div>
-      <div class="step-card">
-        <div class="step-num">2</div>
-                <div class="step-icon"><img src="./icon/Edu/ring2.jpg" alt="로프 끝 잡기"></div>
-        <div class="step-text"><div class="step-desc">구명환에 연결된 줄 끝을 발로 밟거나 손에 단단히 감아쥔 뒤, 대상자보다 바람이나 물살이 흘러오는 방향(상류) 쪽에서 던질 준비를 합니다.</div></div>
+      <div id="gearStepPanel"></div>
+      <div class="ev-nav">
+        <button id="gearPrevBtn">이전</button>
+        <button class="primary" id="gearNextBtn">다음</button>
       </div>
-      <div class="step-card">
-        <div class="step-num">3</div>
-                <div class="step-icon"><img src="./icon/Edu/ring3.jpg" alt="던지기"></div>
-        <div class="step-text"><div class="step-desc">대상자의 몸 쪽 또는 살짝 넘어가도록 던져서, 대상자가 팔을 뻗어 구명환을 잡거나 몸에 걸칠 수 있게 합니다.</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">4</div>
-                <div class="step-icon"><img src="./icon/Edu/ring4.jpg" alt="끌어당기기"></div>
-        <div class="step-text"><div class="step-desc">대상자가 구명환을 양팔로 안거나 팔을 끼우게 한 뒤, 천천히 끌어당겨 안전한 곳으로 이동시킵니다.</div></div>
-      </div>
-
-      <div class="step-title" style="margin:20px 0 8px;">🦺 구명조끼 착용법</div>
-      <div class="warn-box" style="background:#EFF6F8;color:var(--navy);">구명조끼는 <b>정확하게 착용해야</b> 제 역할을 합니다. 특히 <b>다리끈을 채우는 것</b>이 핵심입니다 — 안 채우면 조끼가 위로 벗겨질 수 있습니다. 물에 들어가기 전 아래 7단계를 반드시 확인하세요.</div>
-
-      <div class="step-card">
-        <div class="step-num">1</div>
-        <div class="step-icon"><img src="./icon/Edu/vest1.jpg" alt="체격에 맞는 사이즈 확인"></div>
-        <div class="step-text"><div class="step-title">체격에 맞는 사이즈인지 확인</div><div class="step-desc">조끼를 펼쳐서 몸에 대보고 크기를 확인합니다. <b>너무 크면 물에 빠졌을 때 조끼만 위로 벗겨져</b> 얼굴이 물에 잠길 수 있습니다. 어린이는 반드시 체중에 맞는 유아·아동용을 사용하세요.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">2</div>
-        <div class="step-icon"><img src="./icon/Edu/vest2.jpg" alt="머리 위로 입기"></div>
-        <div class="step-text"><div class="step-title">머리 위로 뒤집어 입기</div><div class="step-desc">앞여밈이 없는 형태는 머리 위로 뒤집어써서 입습니다. 입은 뒤 <b>앞면이 몸 중앙에 잘 맞는지</b>, 목 부분이 턱을 밀어올리지 않는지 확인합니다.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">3</div>
-        <div class="step-icon"><img src="./icon/Edu/vest4.jpg" alt="지퍼 끝까지 잠그기"></div>
-        <div class="step-text"><div class="step-title">지퍼(앞여밈)를 끝까지 잠그기</div><div class="step-desc">지퍼나 버클을 <b>맨 위까지 완전히</b> 채웁니다. 중간까지만 잠그면 물살에 벌어져 조끼가 벗겨질 수 있습니다.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">4</div>
-        <div class="step-icon"><img src="./icon/Edu/vest5.jpg" alt="가슴·허리 스트랩 조이기"></div>
-        <div class="step-text"><div class="step-title">가슴·허리 스트랩 전부 채우고 조이기</div><div class="step-desc">가슴 → 허리 순서로 <b>모든 버클을 채운 뒤</b>, 양쪽 끈을 바깥으로 당겨 몸에 밀착시킵니다. <b>손가락 한두 마디가 들어갈 정도</b>가 적당합니다.</div></div>
-      </div>
-
-      <div class="step-card" style="border:2px solid var(--danger);">
-        <div class="step-num" style="background:var(--danger);">5</div>
-        <div class="step-icon"><img src="./icon/Edu/vest7.jpg" alt="다리끈 반드시 채우기"></div>
-        <div class="step-text"><div class="step-title" style="color:var(--danger);">⚠️ 다리끈(가랑이끈) 반드시 채우기 — 가장 중요</div><div class="step-desc"><b>다리끈은 선택이 아니라 필수입니다.</b> 다리끈을 안 채우면, 물에 빠졌을 때 조끼가 <b>몸통을 타고 위로 밀려 올라가 얼굴까지 덮거나 벗겨질 수 있습니다</b> — 실제 익수 사고에서 구명조끼가 제 역할을 못 하는 가장 흔한 원인입니다. 다리끈을 양쪽 다리 사이로 통과시켜 위로 당겨온 뒤, 몸에 딱 맞게 <b>버클로 고정</b>하세요.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">6</div>
-        <div class="step-icon"><img src="./icon/Edu/vest6.jpg" alt="양팔 들어 확인"></div>
-        <div class="step-text"><div class="step-title">양팔을 위로 들어 당겨보기</div><div class="step-desc">착용을 마치면 <b>양팔을 위로 쭉 들어올려</b> 봅니다. 조끼가 제자리에 있으면 정상(OK). <b>턱이나 귀까지 밀려 올라오면 너무 헐거운 것</b>(NG)이니 스트랩(특히 다리끈)을 더 조이고 다시 확인하세요.</div></div>
-      </div>
-
-      <div class="step-card">
-        <div class="step-num">7</div>
-        <div class="step-icon"><img src="./icon/Edu/vest3.jpg" alt="최종 확인"></div>
-        <div class="step-text"><div class="step-title">최종 점검</div><div class="step-desc">✔ 버클이 모두 제대로 잠겼는지<br>✔ 스트랩이 꼬이지 않았는지<br>✔ 몸을 움직여도 조끼가 밀착돼 있는지<br>✔ <b>다리끈이 반드시 채워져 있는지</b>(가장 중요)<br>어깨를 눌러봤을 때 <b>귀가 옆으로 눌리지 않고 움직임이 편안</b>하면 올바른 착용입니다.</div></div>
-      </div>
-      <div class="src-box">출처: 해양경찰청 구명조끼 착용법</div>
-
-      <div class="step-title" style="margin:20px 0 8px;">🎯 드로우백 (구명로프)</div>
-      <div class="step-card">
-        <div class="step-num">1</div>
-                <div class="step-icon"><img src="./icon/Edu/bag1.jpg" alt="드로우백 꺼내기"></div>
-        <div class="step-text"><div class="step-desc">가방을 열어 로프가 코일 형태로 가지런히 들어있는지 확인합니다(엉켜있으면 던졌을 때 안 풀립니다).</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">2</div>
-                <div class="step-icon"><img src="./icon/Edu/bag2.jpg" alt="로프 끝 고정"></div>
-        <div class="step-text"><div class="step-desc">가방 반대쪽 로프 끝을 자기 손목이나 손에 확실히 고정합니다.</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">3</div>
-                <div class="step-icon"><img src="./icon/Edu/bag3.jpg" alt="던지기"></div>
-        <div class="step-text"><div class="step-desc">대상자를 향해 언더핸드로 가방을 던집니다. 대상자 몸 쪽이나 살짝 넘어가게 던지는 게 좋습니다.</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">4</div>
-                <div class="step-icon"><img src="./icon/Edu/bag4.jpg" alt="끌어당기기"></div>
-        <div class="step-text"><div class="step-desc">대상자가 로프를 양손으로 잡으면, 자신은 낮은 자세를 유지한 채 천천히 끌어당깁니다(끌려 들어가지 않도록 주의).</div></div>
-      </div>
+      <div class="src-box">출처: 해양경찰청 구조장비 사용법</div>
     </div>
 
     <!-- AED 사용법 -->
     <div class="edu-section" id="edu-aed">
-      <div class="step-card">
-        <div class="step-num">1</div>
-                <div class="step-icon"><img src="./icon/Edu/aed1.jpg" alt="전원 켜기"></div>
-        <div class="step-text"><div class="step-title">전원 켜기</div><div class="step-desc">심폐소생술을 방해하지 않는 위치에 AED를 놓고 전원 버튼을 누릅니다. 이후 음성 안내를 따라갑니다.</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">2</div>
-                <div class="step-icon"><img src="./icon/Edu/aed2.jpg" alt="패드 부착"></div>
-        <div class="step-text"><div class="step-title">패드 부착 (맨 가슴에)</div><div class="step-desc">상의를 벗기고 패드 포장지 그림대로 <b>오른쪽 빗장뼈 아래</b>와 <b>왼쪽 젖꼭지 아래 옆구리 쪽</b>에 단단히 붙입니다. <b>여성도 브래지어를 벗길 필요 없이</b> 위치만 조정해 가슴 조직을 피해 부착하면 됩니다(2025년 지침).</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">3</div>
-                <div class="step-icon"><img src="./icon/Edu/aed3.jpg" alt="접촉 금지"></div>
-        <div class="step-text"><div class="step-title">심전도 분석 중 — 접촉 금지</div><div class="step-desc">"분석 중입니다"라는 안내가 나오면 아무도 환자 몸에 닿지 않아야 합니다. 환자가 움직이지 않게 합니다.</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">4</div>
-                <div class="step-icon"><img src="./icon/Edu/aed4.jpg" alt="제세동 버튼"></div>
-        <div class="step-text"><div class="step-title">필요시 제세동 (충격) 버튼</div><div class="step-desc">"제세동이 필요합니다"라는 안내가 나오면, 모두 환자에게서 떨어졌는지 확인한 뒤 깜빡이는 버튼을 누릅니다. "필요하지 않습니다"라고 안내되면 그대로 다음 단계로 넘어갑니다.</div></div>
-      </div>
-      <div class="step-card">
-        <div class="step-num">5</div>
-                <div class="step-icon"><img src="./icon/Edu/aed5.jpg" alt="즉시 압박 재개"></div>
-        <div class="step-text"><div class="step-title">즉시 가슴압박 재개</div><div class="step-desc">충격을 주었든 안 주었든, 곧바로 가슴압박을 다시 시작합니다. AED는 2분마다 자동으로 심전도를 다시 분석합니다. 구급대가 도착할 때까지 반복합니다.</div></div>
+      <div id="aedStepPanel"></div>
+      <div class="ev-nav">
+        <button id="aedPrevBtn">이전</button>
+        <button class="primary" id="aedNextBtn">다음</button>
       </div>
       <div class="src-box">출처: 2025년 한국 심폐소생술 가이드라인 (질병관리청·대한심폐소생협회)</div>
     </div>
 
+  </div>
+</div>
+
+<div class="ev-confirm-overlay" id="cprConfirmOverlay">
+  <div class="ev-confirm">
+    <p class="t2">종료할까요?</p>
+    <p class="d2">기록이 초기화되고 처음부터 다시 시작해야 합니다.</p>
+    <div class="ev-nav">
+      <button id="cprCancelClose">취소</button>
+      <button id="cprConfirmClose" style="border-color:var(--danger);color:var(--danger);">종료</button>
+    </div>
   </div>
 </div>
 
@@ -1986,129 +1930,242 @@ function readRational3(view, tiffStart, ifdOffset, tag, little){
    ========================================================= */
 function openEduPanel(tab){
   document.getElementById('eduPanel').classList.add('show');
+  initEduViewers();
   if(tab) switchEdu(tab);
 }
 function closeEduPanel(){
   document.getElementById('eduPanel').classList.remove('show');
-  stopMetronome();
+  cprStopAll();
 }
 function switchEdu(name){
   document.querySelectorAll('.edu-tab').forEach(t=>t.classList.toggle('active', t.dataset.edu===name));
   document.querySelectorAll('.edu-section').forEach(s=>s.classList.remove('active'));
   document.getElementById('edu-'+name).classList.add('active');
-  if(name!=='cpr') stopMetronome();
+  if(name!=='cpr') cprStopAll();
 }
 
-// 압박 속도 메트로놈 — 분당 100회(2025 가이드라인 100~120회 권장 구간의 하한값), 순수 합성음(Web Audio API)
-let metroCtx = null, metroTimer = null, metroOn = false;
-const METRO_BPM = 100;
+/* =========================================================
+   안전교육 — 카드 한 장씩 넘기는 뷰어(구조장비/AED) + CPR 통합 실행모드
+   ========================================================= */
+const cprSteps = [
+  {img:'./icon/Edu/cpr1.jpg', badge:'1단계', title:'반응 확인', desc:'어깨를 가볍게 두드리며 "괜찮으세요?"라고 크게 물어봅니다. 반응이 없으면 심장정지를 의심합니다.'},
+  {img:'./icon/Edu/cpr2.jpg', badge:'2단계', title:'119 신고 + AED 요청', desc:'호흡 확인보다 먼저입니다. 반응이 없으면 즉시 119에 신고하세요. 스피커폰을 켜고 구급상황요원의 안내를 따르고, 주변 사람에게 신고와 AED 요청을 나눠 부탁하세요.'},
+  {img:'./icon/Edu/cpr3.jpg', badge:'3단계', title:'호흡 확인', desc:'숨을 쉬는지, 정상 호흡인지 확인합니다. 비정상 호흡(심장정지 호흡)이면 심장정지로 판단하고 즉시 가슴압박을 시작합니다.'},
+  {img:'./icon/Edu/cpr4.jpg', badge:'4단계', title:'가슴압박 자세', desc:'복장뼈(가슴뼈) 아래쪽 절반에 손꿈치를 대고, 다른 손을 그 위에 겹쳐 깍지를 낍니다. 팔꿈치를 곧게 펴고 체중을 실어 수직으로 압박합니다.'},
+];
+const gearSteps = [
+  {img:'./icon/Edu/ring1.jpg', badge:'구명환 1/4', title:'구명환을 꺼냅니다', desc:'발견 즉시 큰소리로 주변에 알리고 119에 신고합니다.'},
+  {img:'./icon/Edu/ring2.jpg', badge:'구명환 2/4', title:'로프 끝을 잡습니다', desc:'구명환에 연결된 줄 끝을 손에 단단히 감아쥔 뒤, 바람·물살이 흘러오는 방향(상류) 쪽에서 던질 준비를 합니다.'},
+  {img:'./icon/Edu/ring3.jpg', badge:'구명환 3/4', title:'익수자 뒤쪽을 향해 던집니다', desc:'정면이 아닌 뒤쪽으로 던져야 대상자가 팔을 뻗어 잡기 쉽습니다.'},
+  {img:'./icon/Edu/ring4.jpg', badge:'구명환 4/4', title:'익수자가 잡으면 끌어당깁니다', desc:'구명환을 양팔로 안거나 팔을 끼우게 한 뒤, 천천히 끌어당겨 안전한 곳으로 이동시킵니다.'},
+  {img:'./icon/Edu/vest1.jpg', badge:'구명조끼 1/7', title:'체격에 맞는 사이즈 확인', desc:'조끼를 펼쳐서 몸에 대보고 크기를 확인합니다. 너무 크면 물에 빠졌을 때 조끼만 위로 벗겨져 얼굴이 물에 잠길 수 있습니다. 어린이는 체중에 맞는 유아·아동용을 사용하세요.'},
+  {img:'./icon/Edu/vest2.jpg', badge:'구명조끼 2/7', title:'머리 위로 뒤집어 입기', desc:'앞여밈이 없는 형태는 머리 위로 뒤집어써서 입습니다. 앞면이 몸 중앙에 잘 맞는지 확인합니다.'},
+  {img:'./icon/Edu/vest4.jpg', badge:'구명조끼 3/7', title:'지퍼(앞여밈) 끝까지 잠그기', desc:'지퍼나 버클을 맨 위까지 완전히 채웁니다. 중간까지만 잠그면 물살에 벌어져 벗겨질 수 있습니다.'},
+  {img:'./icon/Edu/vest5.jpg', badge:'구명조끼 4/7', title:'가슴·허리 스트랩 전부 채우고 조이기', desc:'가슴 → 허리 순서로 모든 버클을 채운 뒤, 양쪽 끈을 당겨 몸에 밀착시킵니다. 손가락 한두 마디가 들어갈 정도가 적당합니다.'},
+  {img:'./icon/Edu/vest7.jpg', badge:'구명조끼 5/7 ⚠️중요', title:'다리끈(가랑이끈) 반드시 채우기', desc:'다리끈은 선택이 아니라 필수입니다. 안 채우면 조끼가 몸통을 타고 위로 밀려 올라가 얼굴까지 덮거나 벗겨질 수 있습니다 — 실제 익수 사고에서 가장 흔한 원인입니다.'},
+  {img:'./icon/Edu/vest6.jpg', badge:'구명조끼 6/7', title:'양팔을 위로 들어 당겨보기', desc:'양팔을 위로 쭉 들어올려 봅니다. 조끼가 제자리에 있으면 정상(OK). 턱이나 귀까지 밀려 올라오면 너무 헐거운 것(NG)이니 스트랩(특히 다리끈)을 더 조이세요.'},
+  {img:'./icon/Edu/vest3.jpg', badge:'구명조끼 7/7', title:'최종 점검', desc:'버클이 모두 잠겼는지, 스트랩이 꼬이지 않았는지, 다리끈이 반드시 채워져 있는지 확인합니다. 어깨를 눌러봤을 때 귀가 눌리지 않고 편안하면 올바른 착용입니다.'},
+  {img:'./icon/Edu/bag1.jpg', badge:'드로우백 1/4', title:'드로우백을 꺼냅니다', desc:'가방을 열어 로프가 코일 형태로 가지런히 들어있는지 확인합니다(엉켜있으면 던졌을 때 안 풀립니다).'},
+  {img:'./icon/Edu/bag2.jpg', badge:'드로우백 2/4', title:'로프 끝을 잡습니다', desc:'로프와 드로우백은 연결되어 있습니다. 반대쪽 로프 끝을 손목이나 손에 확실히 고정합니다.'},
+  {img:'./icon/Edu/bag3.jpg', badge:'드로우백 3/4', title:'던지면 로프가 풀려나옵니다', desc:'가방만 던지고 로프 끝은 절대 놓지 마세요. 대상자를 향해 언더핸드로 던집니다.'},
+  {img:'./icon/Edu/bag4.jpg', badge:'드로우백 4/4', title:'익수자가 잡으면 끌어당깁니다', desc:'대상자가 로프를 잡으면 낮은 자세를 유지한 채 천천히 끌어당깁니다(끌려 들어가지 않도록 주의).'},
+];
+const aedSteps = [
+  {img:'./icon/Edu/aed1.jpg', badge:'1단계', title:'전원 켜기', desc:'심폐소생술을 방해하지 않는 위치에 AED를 놓고 전원 버튼을 누릅니다. 이후 음성 안내를 따라갑니다.'},
+  {img:'./icon/Edu/aed2.jpg', badge:'2단계', title:'패드 부착 (맨 가슴에)', desc:'오른쪽 빗장뼈 아래와 왼쪽 가슴 아래 옆구리에 단단히 붙입니다. 여성도 브래지어를 벗길 필요 없이 위치만 조정해 부착하면 됩니다(2025년 지침).'},
+  {img:'./icon/Edu/aed3.jpg', badge:'3단계', title:'심전도 분석 중 — 접촉 금지', desc:'"분석 중입니다" 안내가 나오면 아무도 환자 몸에 닿지 않아야 합니다.'},
+  {img:'./icon/Edu/aed4.jpg', badge:'4단계', title:'필요시 제세동(충격) 버튼', desc:'"제세동이 필요합니다" 안내가 나오면, 모두 환자에게서 떨어졌는지 확인한 뒤 깜빡이는 버튼을 누릅니다.'},
+  {img:'./icon/Edu/aed5.jpg', badge:'5단계', title:'즉시 가슴압박 재개', desc:'충격을 주었든 안 주었든 곧바로 가슴압박을 다시 시작합니다. AED는 2분마다 자동으로 재분석합니다.'},
+];
 
-function toggleMetronome(){
-  if(metroOn) stopMetronome(); else startMetronome();
-}
-
-let metroCompressionCount = 0;
-let metroPhase = 'compress'; // 'compress' | 'breath'
-
-function startMetronome(){
-  if(!metroCtx) metroCtx = new (window.AudioContext || window.webkitAudioContext)();
-  metroOn = true;
-  metroCompressionCount = 0;
-  metroPhase = 'compress';
-  document.getElementById('metroBtn').classList.add('playing');
-  runCompressionBeat();
-}
-
-function beepTone(freq, durationSec, gainLevel){
-  const osc = metroCtx.createOscillator();
-  const gain = metroCtx.createGain();
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(gainLevel, metroCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, metroCtx.currentTime + durationSec);
-  osc.connect(gain).connect(metroCtx.destination);
-  osc.start();
-  osc.stop(metroCtx.currentTime + durationSec + 0.01);
-}
-
-// 실제 "후~" 하는 숨소리처럼 들리도록 화이트노이즈 + 필터로 합성 (단순 삐- 소리 대신)
-function playBreathSound(){
-  const dur = 1.1; // 들숨~날숨 한 번 분량
-  const bufferSize = metroCtx.sampleRate * dur;
-  const buffer = metroCtx.createBuffer(1, bufferSize, metroCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for(let i=0;i<bufferSize;i++){ data[i] = Math.random()*2-1; } // 화이트노이즈
-
-  const noise = metroCtx.createBufferSource();
-  noise.buffer = buffer;
-
-  // 대역통과 필터로 "쉬익~" 하는 숨소리 톤을 만들고, 주파수를 살짝 낮춰가며 날숨 느낌을 냄
-  const filter = metroCtx.createBiquadFilter();
-  filter.type = 'bandpass';
-  filter.Q.value = 0.7;
-  filter.frequency.setValueAtTime(700, metroCtx.currentTime);
-  filter.frequency.linearRampToValueAtTime(300, metroCtx.currentTime + dur);
-
-  const gain = metroCtx.createGain();
-  gain.gain.setValueAtTime(0.0001, metroCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.5, metroCtx.currentTime + dur*0.35);   // 들숨(점점 커짐)
-  gain.gain.exponentialRampToValueAtTime(0.0001, metroCtx.currentTime + dur);     // 날숨(점점 작아짐)
-
-  noise.connect(filter).connect(gain).connect(metroCtx.destination);
-  noise.start();
-  noise.stop(metroCtx.currentTime + dur + 0.05);
-}
-
-function runCompressionBeat(){
-  if(!metroOn) return;
-  const intervalMs = 60000 / METRO_BPM;
-  const btn = document.getElementById('metroBtn');
-  const tick = ()=>{
-    if(!metroOn) return;
-    beepTone(880, 0.08, 0.35);
-    metroCompressionCount++;
-    btn.textContent = `⏹ 압박 중 (${metroCompressionCount}/30) · 분당 100회`;
-    if(metroCompressionCount >= 30){
-      clearInterval(metroTimer);
-      runBreathCue();
-    }
-  };
-  tick();
-  metroTimer = setInterval(tick, intervalMs);
-}
-
-function runBreathCue(){
-  if(!metroOn) return;
-  const btn = document.getElementById('metroBtn');
-  btn.textContent = '🫁 인공호흡 2회 (압박 중지)';
-  // 음성 안내 지원 브라우저면 "인공호흡 두 번"을 말로 안내, 아니면 저음 톤 2번으로 대체
-  if(window.speechSynthesis){
-    try{
-      const utter = new SpeechSynthesisUtterance('인공호흡 두 번');
-      utter.lang = 'ko-KR';
-      utter.rate = 1.0;
-      speechSynthesis.speak(utter);
-    }catch(e){ /* 음성 실패해도 아래 톤으로 대체됨 */ }
+function makeStepViewer(steps, panelId, prevId, nextId, opts){
+  let idx = 0;
+  function render(){
+    const s = steps[idx];
+    document.getElementById(panelId).innerHTML =
+      '<div class="ev-panel"><div class="ev-badge">'+s.badge+'</div>'+
+      '<img class="ev-img" src="'+s.img+'" alt="'+s.title+'">'+
+      '<div class="ev-title">'+s.title+'</div>'+
+      '<div class="ev-desc">'+s.desc+'</div></div>';
+    document.getElementById(prevId).disabled = idx===0;
+    const isLast = idx === steps.length-1;
+    document.getElementById(nextId).textContent = isLast ? (opts && opts.lastLabel || '처음으로') : '다음';
+    if(opts && opts.onRender) opts.onRender(idx);
   }
-  // 실제 숨소리 2번, 한 번당 3초 간격(0초, 3초 지점)으로 배치
-  playBreathSound();
-  setTimeout(()=>{ if(metroOn) playBreathSound(); }, 3000);
-
-  // 인공호흡 2회(1회당 3초, 총 6초) 뒤 다시 압박 30회로 복귀
-  setTimeout(()=>{
-    if(!metroOn) return;
-    metroCompressionCount = 0;
-    runCompressionBeat();
-  }, 6000);
+  document.getElementById(prevId).onclick = function(){ if(idx>0){ idx--; render(); } };
+  document.getElementById(nextId).onclick = function(){
+    if(idx < steps.length-1){ idx++; render(); }
+    else if(opts && opts.onLast){ opts.onLast(); }
+    else { idx = 0; render(); }
+  };
+  render();
+  return { reset(){ idx=0; render(); }, goToIndex(i){ idx=i; render(); } };
 }
 
-function stopMetronome(){
-  metroOn = false;
-  if(metroTimer) clearInterval(metroTimer);
-  if(window.speechSynthesis) speechSynthesis.cancel();
-  metroCompressionCount = 0;
-  const btn = document.getElementById('metroBtn');
-  if(btn){ btn.textContent = '🔊 압박 속도 메트로놈 재생 (분당 100회, 30:2 안내 포함)'; btn.classList.remove('playing'); }
+let cprViewer = null, gearViewer = null;
+function initEduViewers(){
+  if(cprViewer) return; // 패널 열 때마다 다시 초기화하지 않음(이미 만들어져 있으면 그대로 재사용)
+  cprViewer = makeStepViewer(cprSteps, 'cprStepPanel', 'cprPrevBtn', 'cprNextBtn', { lastLabel:'압박 시작 ▶', onLast: cprStartExecMode });
+  gearViewer = makeStepViewer(gearSteps, 'gearStepPanel', 'gearPrevBtn', 'gearNextBtn', { onRender: updateGearSubtab });
+  makeStepViewer(aedSteps, 'aedStepPanel', 'aedPrevBtn', 'aedNextBtn');
+
+  // 구명환/구명조끼/드로우백 서브탭 — 눌리면 해당 구간 첫 스텝으로 바로 이동
+  document.querySelectorAll('#gearSubtab .ev-subtab-item').forEach(function(el){
+    el.addEventListener('click', function(){ gearViewer.goToIndex(parseInt(this.dataset.i, 10)); });
+  });
 }
+// 지금 보고 있는 스텝이 구명환/구명조끼/드로우백 중 어디 구간인지에 맞춰 서브탭 강조 표시를 갱신
+function updateGearSubtab(idx){
+  const bounds = [0,4,11,gearSteps.length]; // 구명환[0-3] 구명조끼[4-10] 드로우백[11-14]
+  let section = 0;
+  if(idx >= bounds[2]) section = 2; else if(idx >= bounds[1]) section = 1;
+  document.querySelectorAll('#gearSubtab .ev-subtab-item').forEach(function(el, i){
+    el.classList.toggle('active', i === section);
+  });
+}
+
+/* ---- CPR 실행모드(압박·인공호흡·제세동 통합, 음성인식, 경과기록) ---- */
+let cprPhase='compress', cprCount=0, cprRunning=true, cprCycle=1, cprShocks=0, cprElapsedSec=0, cprShockTimes=[];
+let cprAudioCtx=null, cprRecognition=null, cprBeatTimer=null, cprClockTimer=null;
+
+function cprStartExecMode(){
+  document.getElementById('cprStepPanel').style.display='none';
+  document.getElementById('cprStepNav').style.display='none';
+  document.getElementById('cprExecArea').style.display='block';
+  document.getElementById('cprPhaseBadge').textContent='준비됨';
+  document.getElementById('cprPhaseImg').src='./icon/Edu/cpr4.jpg';
+  document.getElementById('cprBigNum').textContent='▶';
+  document.getElementById('cprBigLabel').textContent='아래 버튼을 눌러 시작하세요';
+  document.getElementById('cprStartGateBtn').style.display='block';
+  document.getElementById('cprRunningControls').style.display='none';
+}
+function cprReallyStart(){
+  document.getElementById('cprStartGateBtn').style.display='none';
+  document.getElementById('cprRunningControls').style.display='flex';
+  cprAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  cprStartVoice();
+  document.getElementById('cprBigLabel').textContent='준비...';
+  setTimeout(function(){
+    cprLoop();
+    cprClockTimer = setInterval(function(){ if(cprRunning){ cprElapsedSec++; cprRender(); } }, 1000);
+  }, 1000);
+}
+function cprStartVoice(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const statusEl = document.getElementById('cprVoiceStatus');
+  if(location.protocol === 'file:'){ statusEl.textContent='⚠️ 파일을 직접 열면 마이크 권한이 막혀 음성인식이 안 됩니다.'; return; }
+  if(!SR){ statusEl.textContent='🎙 이 브라우저는 음성인식을 지원하지 않습니다'; return; }
+  cprRecognition = new SR();
+  cprRecognition.lang='ko-KR'; cprRecognition.continuous=true; cprRecognition.interimResults=false;
+  cprRecognition.onresult = function(e){
+    const said = e.results[e.results.length-1][0].transcript.trim();
+    statusEl.textContent = '🎙 들음: "'+said+'"';
+    if(said.includes('정지')){ if(cprRunning){ cprRunning=false; document.getElementById('cprPauseBtn').textContent='▶ 시작'; } }
+    else if(said.includes('시작')){ if(!cprRunning){ cprRunning=true; document.getElementById('cprPauseBtn').textContent='⏸ 정지'; } }
+    else if(said.includes('제세동')){ document.getElementById('cprShockBtn').click(); }
+    else if(said.includes('종료')){ document.getElementById('cprCloseBtn').click(); }
+  };
+  cprRecognition.onerror = function(e){ statusEl.textContent = '🎙 오류: '+e.error; };
+  cprRecognition.onend = function(){ if(cprRunning!==null){ try{ cprRecognition.start(); }catch(e){} } };
+  try{ cprRecognition.start(); statusEl.textContent='🎙 음성인식 켜짐 — "시작" "정지" "제세동" "종료"'; }
+  catch(e){ statusEl.textContent='🎙 음성인식 시작 실패'; }
+}
+function cprBeep(freq,dur,gain){
+  const o=cprAudioCtx.createOscillator(), g=cprAudioCtx.createGain();
+  o.frequency.value=freq; g.gain.setValueAtTime(gain,cprAudioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,cprAudioCtx.currentTime+dur);
+  o.connect(g).connect(cprAudioCtx.destination); o.start(); o.stop(cprAudioCtx.currentTime+dur+0.01);
+}
+function cprBreathTone(){
+  const o=cprAudioCtx.createOscillator(), g=cprAudioCtx.createGain();
+  o.frequency.value=440; g.gain.setValueAtTime(0.0001,cprAudioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.3,cprAudioCtx.currentTime+0.3);
+  g.gain.exponentialRampToValueAtTime(0.0001,cprAudioCtx.currentTime+0.9);
+  o.connect(g).connect(cprAudioCtx.destination); o.start(); o.stop(cprAudioCtx.currentTime+1);
+}
+function cprFmtTime(sec){ const m=Math.floor(sec/60), s=sec%60; return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'); }
+function cprRenderDots(total, filled, breathMode){
+  const el=document.getElementById('cprDots'); el.innerHTML='';
+  const show=Math.min(total,15);
+  for(let i=0;i<show;i++){
+    const d=document.createElement('div');
+    const on = i < Math.round((filled/total)*show);
+    d.className='ev-dot'+(on?' on':'')+(on&&breathMode?' breath':'');
+    el.appendChild(d);
+  }
+}
+function cprUpdateSummary(){
+  const last = cprShocks>0 ? (' (마지막 '+cprFmtTime(cprShockTimes[cprShockTimes.length-1])+')') : '';
+  document.getElementById('cprSummary').textContent =
+    '총 경과 '+cprFmtTime(cprElapsedSec)+' · 완료 '+(cprCycle-1)+'주기 (현재 '+cprCount+'회째) · 제세동 '+cprShocks+'회'+last;
+}
+function cprRender(){
+  document.getElementById('cprElapsed').textContent = cprFmtTime(cprElapsedSec);
+  document.getElementById('cprCycleCount').textContent = (cprCycle-1)+'주기 '+cprCount+'회';
+  document.getElementById('cprShockCount').textContent = cprShocks+'회';
+  cprUpdateSummary();
+  const badge=document.getElementById('cprPhaseBadge'), img=document.getElementById('cprPhaseImg');
+  if(cprPhase==='compress'){
+    badge.textContent='가슴압박 중'; badge.className='ev-badge';
+    img.src = cprCount%2===0 ? './icon/Edu/cpr4.jpg' : './icon/Edu/cpr5.jpg';
+    document.getElementById('cprBigNum').textContent=cprCount;
+    document.getElementById('cprBigLabel').textContent='/ 30회';
+    cprRenderDots(30,cprCount,false);
+  } else {
+    badge.textContent='인공호흡 중'; badge.className='ev-badge breath';
+    img.src='./icon/Edu/cpr6.jpg';
+    document.getElementById('cprBigNum').textContent=cprCount;
+    document.getElementById('cprBigLabel').textContent='/ 2회';
+    cprRenderDots(2,cprCount,true);
+  }
+}
+function cprTick(){
+  if(!cprRunning) return;
+  cprCount++;
+  if(cprPhase==='compress' && cprCount>30){ cprPhase='breath'; cprCount=1; }
+  else if(cprPhase==='breath' && cprCount>2){ cprPhase='compress'; cprCount=1; cprCycle++; }
+  if(cprPhase==='compress') cprBeep(880,0.08,0.35); else cprBreathTone();
+  cprRender();
+}
+function cprLoop(){ cprTick(); const delay = cprPhase==='compress' ? 600 : 3000; cprBeatTimer=setTimeout(cprLoop, delay); }
+
+function cprStopAll(){
+  cprRunning=false;
+  if(cprBeatTimer) clearTimeout(cprBeatTimer);
+  if(cprClockTimer) clearInterval(cprClockTimer);
+  if(cprRecognition){ cprRecognition.onend=null; try{cprRecognition.stop();}catch(e){} }
+}
+function cprResetToStepView(){
+  cprPhase='compress'; cprCount=0; cprCycle=1; cprShocks=0; cprElapsedSec=0; cprShockTimes=[];
+  document.getElementById('cprExecArea').style.display='none';
+  document.getElementById('cprStepPanel').style.display='block';
+  document.getElementById('cprStepNav').style.display='flex';
+  if(cprViewer) cprViewer.reset();
+}
+
+document.getElementById('cprStartGateBtn').addEventListener('click', cprReallyStart);
+document.getElementById('cprPauseBtn').addEventListener('click', function(){
+  cprRunning = !cprRunning; this.textContent = cprRunning ? '⏸ 정지' : '▶ 시작';
+});
+document.getElementById('cprShockBtn').addEventListener('click', function(){
+  cprShocks++; cprShockTimes.push(cprElapsedSec);
+  document.getElementById('cprPhaseImg').src='./icon/Edu/cpr7.jpg';
+  cprPhase='compress'; cprCount=1; cprCycle++; cprRunning=true;
+  document.getElementById('cprPauseBtn').textContent='⏸ 정지';
+  cprRender();
+});
+document.getElementById('cprCloseBtn').addEventListener('click', function(){
+  document.getElementById('cprConfirmOverlay').classList.add('show');
+});
+document.getElementById('cprCancelClose').addEventListener('click', function(){
+  document.getElementById('cprConfirmOverlay').classList.remove('show');
+});
+document.getElementById('cprConfirmClose').addEventListener('click', function(){
+  cprStopAll();
+  document.getElementById('cprConfirmOverlay').classList.remove('show');
+  cprResetToStepView();
+});
+
 
 function openDirections(){
   const rec = markerObjs[currentMarkerId].record;
