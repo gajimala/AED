@@ -2147,7 +2147,13 @@ function cprStartVoice(){
     cprLogVoice(`buildAndStart() 시도 ${retryCount+1}/${MAX_RETRY+1}`);
     const rec = new SR();
     rec.lang='ko-KR'; rec.continuous=true; rec.interimResults=false;
-    rec.onstart = function(){ cprLogVoice('✅ onstart — 실제로 듣기 시작함'); };
+    rec.onstart = function(){
+      cprLogVoice('✅ onstart — 실제로 듣기 시작함');
+      retryCount = 0; // ⚠️ 진짜 버그였음: 한 번이라도 성공하면 재시도 횟수를 초기화해야 하는데
+                       // 안 하고 있어서, 기기가 "계속 듣기" 도중 자연스럽게 몇 초마다 끊고 다시
+                       // 켜는 경우(흔한 실제 동작)에도 계속 실패로 집계돼서 결국 포기해버리거나
+                       // 상태가 꼬이는 원인이 됐음.
+    };
     rec.onresult = function(e){
       const said = e.results[e.results.length-1][0].transcript.trim();
       cprLogVoice('🎙 들음: "'+said+'"');
@@ -2310,6 +2316,10 @@ document.getElementById('cprConfirmClose').addEventListener('click', function(){
   cprStopAll();
   document.getElementById('cprConfirmOverlay').classList.remove('show');
   cprResetToStepView();
+  // ⚠️ 진짜 원인이었던 버그: cprStopAll()이 음성인식을 꺼둔 채로 1단계 화면에 남아있었음.
+  // 여기서(패널을 닫은 게 아니라 계속 CPR 탭 안에 머무는 거니까) 음성인식을 다시 켜서,
+  // 굳이 패널을 닫았다 다시 열지 않아도 "시작"이라고 바로 말할 수 있게 함.
+  cprStartVoice();
 });
 
 
