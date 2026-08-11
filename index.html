@@ -511,6 +511,7 @@
           <img id="cprSternumImg" src="./icon/Edu/cpr_sternum.jpg" alt="복장뼈 위치">
           <span>압박 위치 — 복장뼈 아래쪽 절반</span>
         </div>
+        <button id="cprCopyLogBtn" onclick="cprCopyVoiceLog()" style="width:100%;margin-top:6px;background:#0FA3B1;color:#fff;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;">📋 진단 로그 복사하기</button>
         <div class="ev-voice" id="cprVoiceStatus"></div>
         <div class="ev-summary">
           <div class="t">구급대 인계용 요약</div>
@@ -2098,6 +2099,25 @@ function cprReallyStart(){
   }, 1000);
 }
 let cprVoiceLog = []; // 세션이 여러 번 바뀌어도 안 지워지는 진단용 로그 — 종료→재진입 사이에 실제로 무슨 일이 있었는지 화면에서 그대로 확인 가능하게 함
+function cprCopyVoiceLog(){
+  const text = cprVoiceLog.join('\n') || '(아직 로그 없음)';
+  const btn = document.getElementById('cprCopyLogBtn');
+  const done = ()=>{ const old = btn.textContent; btn.textContent = '✅ 복사됨! 채팅에 붙여넣기 하세요'; setTimeout(()=>{ btn.textContent = old; }, 2500); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(()=>{ cprCopyFallback(text, done); });
+  } else {
+    cprCopyFallback(text, done);
+  }
+}
+function cprCopyFallback(text, done){
+  // 클립보드 API가 막혀있는 환경(오래된 브라우저, 권한 문제 등)을 위한 대안 — 화면에 선택된 텍스트박스를 띄워 수동 복사
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done(); }
+  catch(e){ alert('자동 복사에 실패했습니다. 아래 로그 상자를 길게 눌러 직접 복사해주세요.'); }
+  document.body.removeChild(ta);
+}
 function cprLogVoice(msg){
   const t = new Date();
   const stamp = String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0')+'.'+String(t.getMilliseconds()).padStart(3,'0');
