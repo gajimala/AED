@@ -2074,7 +2074,15 @@ function cprStartExecMode(){
 function cprReallyStart(){
   document.getElementById('cprStartGateBtn').style.display='none';
   document.getElementById('cprRunningControls').style.display='flex';
-  // (오디오 컨텍스트·음성인식은 준비화면에 들어올 때 이미 켜둠 — cprStartExecMode 참고)
+  // ⚠️ 브라우저 자동재생 정책 때문에 AudioContext가 "일시정지(suspended)" 상태로 만들어질 때가
+  // 있는데, 이 상태에서는 오디오 코드가 에러 없이 그냥 조용히 소리를 안 냄. 명시적으로
+  // resume()을 호출해서 확실히 소리가 나게 함.
+  if(cprAudioCtx && cprAudioCtx.state === 'suspended'){ cprAudioCtx.resume(); }
+  // ⚠️ 혹시라도 이전에 시작된 루프가 안 지워진 채로 남아있으면(중복 호출 등), 새로 하나 더
+  // 시작될 때 두 개가 겹쳐 돌면서 박자가 두 배로 빨라지는 문제가 생길 수 있음 — 방어적으로
+  // 새로 시작하기 전에 기존 타이머를 확실히 정리함.
+  if(cprBeatTimer) clearTimeout(cprBeatTimer);
+  if(cprClockTimer) clearInterval(cprClockTimer);
   // "준비..." 1초 지연은 의도된 UX임(급하게 첫 압박이 튀어나오지 않도록) — 그대로 유지.
   // ⚠️ 진짜 버그는 따로 있었음: 이전에 "정지"나 "종료"를 했던 적이 있으면 cprRunning이
   // false로 남아있어서, 1초 뒤 루프가 돌긴 돌아도 조용히 아무 소리도 안 내고 있었음.
@@ -2124,12 +2132,14 @@ function cprStartVoice(){
   catch(e){ statusEl.textContent='🎙 음성인식 시작 실패'; }
 }
 function cprBeep(freq,dur,gain){
+  if(cprAudioCtx.state === 'suspended') cprAudioCtx.resume(); // 매 박자마다 확인 — 중간에 화면이 잠깐 꺼졌다 켜지는 등으로 다시 suspended될 수 있음
   const o=cprAudioCtx.createOscillator(), g=cprAudioCtx.createGain();
   o.frequency.value=freq; g.gain.setValueAtTime(gain,cprAudioCtx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001,cprAudioCtx.currentTime+dur);
   o.connect(g).connect(cprAudioCtx.destination); o.start(); o.stop(cprAudioCtx.currentTime+dur+0.01);
 }
 function cprBreathTone(){
+  if(cprAudioCtx.state === 'suspended') cprAudioCtx.resume();
   const o=cprAudioCtx.createOscillator(), g=cprAudioCtx.createGain();
   o.frequency.value=440; g.gain.setValueAtTime(0.0001,cprAudioCtx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.3,cprAudioCtx.currentTime+0.3);
