@@ -931,6 +931,7 @@ async function initMap(){
   // 처음엔 내 GPS 위치를 중심으로 먼저 맞추고(최대 8초 대기, 실패해도 넘어감) —
   // 이후엔 지도를 강제로 다시 옮기지 않음(사용자가 팬/줌하면 그대로 둠)
   await centerMapOnMyLocationOnce();
+  requestMicPermissionEarly(); // CPR 음성인식용 마이크 권한을 미리 받아둠 — 실제 응급상황에서 권한창 지연 없이 바로 음성인식 시작되게 함
   startMyLocationTracking();
 
   // AED는 기본적으로 항상 켜진 상태로 시작 — 버튼은 이제 껐다 켜는 토글 용도.
@@ -954,6 +955,16 @@ function goToMyLocation(){
     (err)=>{ alert('위치를 가져오지 못했습니다. 위치 권한을 확인해주세요.'); },
     { enableHighAccuracy:true, timeout:8000, maximumAge:0 }
   );
+}
+
+// CPR 음성인식(시작/정지/제세동/종료 음성명령)에 쓸 마이크 권한을 앱 켤 때 위치정보와 함께 미리 받아둠.
+// 실제 CPR 화면에 들어갔을 때 권한창 뜨는 걸 기다릴 필요 없이 바로 음성인식이 시작되게 하기 위함.
+function requestMicPermissionEarly(){
+  if(location.protocol === 'file:') return; // 파일 직접 열면 어차피 마이크 권한 자체가 막혀있음
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  navigator.mediaDevices.getUserMedia({ audio:true })
+    .then(stream => stream.getTracks().forEach(t => t.stop())) // 권한만 받아두고 실제 녹음은 안 함(즉시 정지)
+    .catch(e => console.warn('마이크 권한 사전 요청 실패(CPR 화면에서 다시 물어볼 수 있음):', e.message));
 }
 
 function centerMapOnMyLocationOnce(){
@@ -2038,12 +2049,16 @@ function cprStartExecMode(){
   document.getElementById('cprBigLabel').textContent='아래 버튼을 눌러 시작하세요';
   document.getElementById('cprStartGateBtn').style.display='block';
   document.getElementById('cprRunningControls').style.display='none';
+  // ⚠️ 예전엔 "압박 시작" 버튼을 눌러야만 음성인식이 켜져서, 이 "준비됨" 대기화면에서
+  // "시작"이라고 말해도 아무 반응이 없었음. 이제 이 화면에 들어오는 즉시 음성인식을 켜서
+  // 버튼을 누르지 않고 말로만 "시작"해도 바로 압박이 시작되게 함.
+  cprAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  cprStartVoice();
 }
 function cprReallyStart(){
   document.getElementById('cprStartGateBtn').style.display='none';
   document.getElementById('cprRunningControls').style.display='flex';
-  cprAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
-  cprStartVoice();
+  // (오디오 컨텍스트·음성인식은 준비화면에 들어올 때 이미 켜둠 — cprStartExecMode 참고)
   document.getElementById('cprBigLabel').textContent='준비...';
   setTimeout(function(){
     cprLoop();
@@ -2060,6 +2075,12 @@ function cprStartVoice(){
   cprRecognition.onresult = function(e){
     const said = e.results[e.results.length-1][0].transcript.trim();
     statusEl.textContent = '🎙 들음: "'+said+'"';
+    const onGateScreen = document.getElementById('cprStartGateBtn').style.display !== 'none';
+    if(onGateScreen){
+      // 아직 "압박 시작" 버튼을 안 누른 대기 화면 — "시작"이라고 말하면 그걸로 바로 압박 개시
+      if(said.includes('시작')) cprReallyStart();
+      return;
+    }
     if(said.includes('정지')){ if(cprRunning){ cprRunning=false; document.getElementById('cprPauseBtn').textContent='▶ 시작'; } }
     else if(said.includes('시작')){ if(!cprRunning){ cprRunning=true; document.getElementById('cprPauseBtn').textContent='⏸ 정지'; } }
     else if(said.includes('제세동')){ document.getElementById('cprShockBtn').click(); }
