@@ -1959,12 +1959,17 @@ function openEduPanel(tab){
 function closeEduPanel(){
   document.getElementById('eduPanel').classList.remove('show');
   cprStopAll();
+  // ⚠️ 진짜 원인이었던 버그: cprStopAll()은 타이머·음성인식만 멈추고 화면 상태(cprExecArea가
+  // 계속 보이는 채로 남는 것 등)는 그대로 둠. 그 상태로 다시 들어오면, 음성인식 핸들러가
+  // "아직 시작 전"이 아니라 "이미 실행 중이던 화면"으로 착각해서 "시작"이라고 말해도
+  // 아무 반응이 없었음("종료" 버튼을 거쳐야만 정상 동작했던 이유). 여기서도 확실히 초기화함.
+  cprResetToStepView();
 }
 function switchEdu(name){
   document.querySelectorAll('.edu-tab').forEach(t=>t.classList.toggle('active', t.dataset.edu===name));
   document.querySelectorAll('.edu-section').forEach(s=>s.classList.remove('active'));
   document.getElementById('edu-'+name).classList.add('active');
-  if(name!=='cpr') cprStopAll();
+  if(name!=='cpr'){ cprStopAll(); cprResetToStepView(); } // 화면 상태도 같이 초기화(위 closeEduPanel과 동일한 이유)
   // ⚠️ 예전엔 "압박 시작" 버튼을 눌러 준비화면까지 가야만 음성인식이 켜져서, 그 전(1~3단계 보는 중)에
   // "시작"이라고 말해도 아무 반응이 없었고, 준비화면에 도착해서 또 한 번 "시작"을 말해야 했음.
   // 이제 심폐소생술 탭에 들어오는 즉시 음성인식을 켜서, 어느 단계에 있든 "시작"이라고 한 번만
@@ -2596,14 +2601,15 @@ function createBackupNow(){
   msg.textContent = '백업 생성 중…'; msg.className='msg ok'; msg.style.display='block';
   fetch(`${WORKER_URL}/backups`, { method:'POST', headers:{ 'X-Admin-Code': ADMIN_CODE } })
     .then(async res=>{
-      if(!res.ok) throw new Error(await res.text());
+      if(!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       const r = await res.json();
       msg.textContent = `✅ 백업 완료 (${r.count}건 저장됨)`; msg.className='msg ok'; msg.style.display='block';
       renderBackupList();
     })
     .catch(e=>{
       console.error('백업 생성 실패', e);
-      msg.textContent = '백업 생성에 실패했습니다.'; msg.className='msg err'; msg.style.display='block';
+      // ⚠️ 예전엔 뭉뚱그린 문구만 보여줘서 진짜 원인을 알 수가 없었음 — 실제 서버 응답을 그대로 보여줌
+      msg.textContent = '백업 생성 실패: ' + e.message; msg.className='msg err'; msg.style.display='block';
     });
 }
 
@@ -2613,7 +2619,7 @@ function restoreBackup(name, label){
   msg.textContent = '복구 중… (데이터 양에 따라 몇십 초 걸릴 수 있습니다)'; msg.className='msg ok'; msg.style.display='block';
   fetch(`${WORKER_URL}/backups/${encodeURIComponent(name)}`, { method:'POST', headers:{ 'X-Admin-Code': ADMIN_CODE } })
     .then(async res=>{
-      if(!res.ok) throw new Error(await res.text());
+      if(!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       const r = await res.json();
       msg.textContent = `✅ "${label}" 시점으로 복구 완료 (${r.count}건). 새로고침하면 반영된 걸 볼 수 있습니다.`;
       msg.className='msg ok'; msg.style.display='block';
@@ -2622,7 +2628,7 @@ function restoreBackup(name, label){
     })
     .catch(e=>{
       console.error('복구 실패', e);
-      msg.textContent = '복구에 실패했습니다.'; msg.className='msg err'; msg.style.display='block';
+      msg.textContent = '복구 실패: ' + e.message; msg.className='msg err'; msg.style.display='block';
     });
 }
 
