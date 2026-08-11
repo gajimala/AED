@@ -2315,11 +2315,16 @@ document.getElementById('cprCancelClose').addEventListener('click', function(){
 document.getElementById('cprConfirmClose').addEventListener('click', function(){
   cprStopAll();
   document.getElementById('cprConfirmOverlay').classList.remove('show');
-  cprResetToStepView();
-  // ⚠️ 진짜 원인이었던 버그: cprStopAll()이 음성인식을 꺼둔 채로 1단계 화면에 남아있었음.
-  // 여기서(패널을 닫은 게 아니라 계속 CPR 탭 안에 머무는 거니까) 음성인식을 다시 켜서,
-  // 굳이 패널을 닫았다 다시 열지 않아도 "시작"이라고 바로 말할 수 있게 함.
-  cprStartVoice();
+  // ⚠️ 예전엔 cprResetToStepView() 안에서 뭔가 문제가 생기면(예외 발생) 그 아래 있던
+  // cprStartVoice() 호출까지 통째로 건너뛰어져서, 음성인식이 조용히 안 켜지는 경우가
+  // 있었던 것으로 보임. try/finally로 감싸서 어떤 상황에서도 음성인식은 반드시 다시 켜지게 함.
+  try{
+    cprResetToStepView();
+  }catch(e){
+    cprLogVoice('⚠️ cprResetToStepView() 오류: '+e.message);
+  }finally{
+    cprStartVoice();
+  }
 });
 
 
