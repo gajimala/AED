@@ -898,13 +898,24 @@ let currentMarkerId = null;
 let editingCoord = false;
 let geocoder = null;
 let currentRegionFilter = 'all';
-let LIFESAVER_ICON = null; // kakao 로드 확인 후 initMap 안에서 생성 (최상단에서 만들면 SDK 로드 실패 시 스크립트 전체가 깨짐)
+let LIFESAVER_ICON = null, LIFESAVER_ICON_ADMIN = null, LIFESAVER_ICON_CIVILIAN = null;
+// kakao 로드 확인 후 initMap 안에서 생성 (최상단에서 만들면 SDK 로드 실패 시 스크립트 전체가 깨짐)
 
 async function initMap(){
-  // 구조함 표시 아이콘 — 예전 프로젝트(kcg-lifesaver-gg)에 있던 실제 구명환 아이콘 이미지 사용.
-  // icon/lifesaver-icon.png 파일이 이 index.html과 같은 폴더 구조(./icon/) 안에 있어야 함.
+  // 구조함 표시 아이콘 3종 — 마지막으로 누가 손댔는지에 따라 색을 다르게 표시함(구별용).
+  // 원본(진한 주황) = 기존 데이터 그대로 / 옅은 주황 = 관리자(소속기관)가 신규·수정 / 빨강 = 민간인이 신규·수정
   LIFESAVER_ICON = new kakao.maps.MarkerImage(
     './icon/lifesaver-icon.png',
+    new kakao.maps.Size(36, 36),
+    { offset: new kakao.maps.Point(18, 18) }
+  );
+  LIFESAVER_ICON_ADMIN = new kakao.maps.MarkerImage(
+    './icon/lifesaver-icon-lightorange.png',
+    new kakao.maps.Size(36, 36),
+    { offset: new kakao.maps.Point(18, 18) }
+  );
+  LIFESAVER_ICON_CIVILIAN = new kakao.maps.MarkerImage(
+    './icon/lifesaver-icon-red.png',
     new kakao.maps.Size(36, 36),
     { offset: new kakao.maps.Point(18, 18) }
   );
@@ -1445,19 +1456,26 @@ function openAedDirections(lat, lng, name){
   else window.open(url, '_blank');
 }
 
+// 레코드의 lastEditSource(civilian/admin/없음)에 따라 알맞은 아이콘을 고름
+function pickLifesaverIcon(rec){
+  if(rec.lastEditSource === 'civilian') return LIFESAVER_ICON_CIVILIAN;
+  if(rec.lastEditSource === 'admin') return LIFESAVER_ICON_ADMIN;
+  return LIFESAVER_ICON;
+}
+
 function buildMarker(rec){
   const pos = new kakao.maps.LatLng(rec.lat, rec.lng);
-  const marker = new kakao.maps.Marker({ position: pos, image: LIFESAVER_ICON }); // map은 지정 안 함 — 클러스터러가 관리
+  const marker = new kakao.maps.Marker({ position: pos, image: pickLifesaverIcon(rec) }); // map은 지정 안 함 — 클러스터러가 관리
   kakao.maps.event.addListener(marker, 'click', ()=>openMarkerSheet(rec.id));
   kakao.maps.event.addListener(marker, 'dragend', ()=>{
     const p = marker.getPosition();
     const before = markerObjs[rec.id].record;
     const oldLat = before.lat, oldLng = before.lng;
-    upsertRecord({...before, lat:p.getLat(), lng:p.getLng(), region: undefined});
+    const updated = {...before, lat:p.getLat(), lng:p.getLng(), region: undefined, lastEditSource:'admin'};
+    upsertRecord(updated);
     logAdminChange('edit', rec.id, before.addr, oldLat, oldLng, p.getLat(), p.getLng(), '관리자 아이콘 드래그 이동');
-    markerObjs[rec.id].record.lat = p.getLat();
-    markerObjs[rec.id].record.lng = p.getLng();
-    markerObjs[rec.id].record.region = undefined;
+    markerObjs[rec.id].record = updated;
+    marker.setImage(pickLifesaverIcon(updated)); // 옅은 주황(관리자 수정)으로 즉시 갱신
     clusterer.redraw();
     classifyMissingRegions();
     refreshMarkerSheetIfOpen(rec.id, '아이콘 위치가 저장되었습니다.');
@@ -1840,10 +1858,14 @@ async function applyApprovedChange(entry, isCivilianAuto){
     // 서버 반영 성공 확인됨 — 이제 화면(로컬)도 갱신
   }
 
+  // 아이콘 색 구별용 — 실제 내용을 제출한 쪽 기준(자동승인이든 관리자가 수동승인했든, 원래
+  // 민간인이 제보한 내용이면 빨강으로 계속 표시되게 함. entry.source가 없으면 관리자 직접작업으로 간주.
+  const sourceTag = entry.source === 'civilian' ? 'civilian' : 'admin';
+
   // 화면(로컬) 반영 — 관리자 경로에선 upsert/deleteRecord가 서버 저장까지 같이 담당,
   // 민간인 경로에선 위에서 서버 반영이 이미 끝난 뒤라 여기선 화면 갱신만 함(중복 저장 방지).
   if(entry.type==='add'){
-    const rec = {id: entry.targetId || newId(), lat:entry.newLat, lng:entry.newLng, addr:entry.addr||'', note:''};
+    const rec = {id: entry.targetId || newId(), lat:entry.newLat, lng:entry.newLng, addr:entry.addr||'', note:'', lastEditSource:sourceTag};
     if(isCivilianAuto){
       _cache = loadRecords().concat([rec]);
     } else {
@@ -1859,7 +1881,7 @@ async function applyApprovedChange(entry, isCivilianAuto){
   } else { // edit
     const target = markerObjs[entry.targetId];
     if(target){
-      const rec = {...target.record, lat:entry.newLat, lng:entry.newLng, region: undefined};
+      const rec = {...target.record, lat:entry.newLat, lng:entry.newLng, region: undefined, lastEditSource:sourceTag};
       if(isCivilianAuto){
         const list = loadRecords();
         const i = list.findIndex(r=>r.id===rec.id);
@@ -1870,6 +1892,7 @@ async function applyApprovedChange(entry, isCivilianAuto){
       }
       target.record = rec;
       target.marker.setPosition(new kakao.maps.LatLng(entry.newLat, entry.newLng));
+      target.marker.setImage(pickLifesaverIcon(rec)); // 색 구별 즉시 반영
     }
   }
   clusterer.redraw();
@@ -2384,11 +2407,12 @@ function saveEditCoord(){
     return;
   }
   const before = markerObjs[currentMarkerId].record;
-  const rec = {...before, lat, lng, addr, region: undefined};
+  const rec = {...before, lat, lng, addr, region: undefined, lastEditSource:'admin'};
   upsertRecord(rec);
   logAdminChange('edit', rec.id, addr||before.addr, before.lat, before.lng, lat, lng, '관리자 좌표 직접수정');
   markerObjs[currentMarkerId].record = rec;
   markerObjs[currentMarkerId].marker.setPosition(new kakao.maps.LatLng(lat,lng));
+  markerObjs[currentMarkerId].marker.setImage(pickLifesaverIcon(rec)); // 옅은 주황(관리자 수정)으로 즉시 갱신
   clusterer.redraw();
   cancelEditCoord();
   classifyMissingRegions();
@@ -2952,7 +2976,7 @@ function addSingle(){
   if(isNaN(lat) || isNaN(lng)){
     msg.textContent='위도/경도를 정확히 입력하세요.'; msg.className='msg err'; msg.style.display='block'; return;
   }
-  const rec = {id:newId(), lat, lng, addr, note};
+  const rec = {id:newId(), lat, lng, addr, note, lastEditSource:'admin'};
   upsertRecord(rec);
   logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력');
   addMarkerToMap(rec);
@@ -3321,11 +3345,12 @@ function saveBulkEdit(){
     const addr = tr.querySelector('.be-addr').value.trim();
     const note = tr.querySelector('.be-note').value.trim();
     if(isNaN(lat) || isNaN(lng)){ errors++; return; }
-    const rec = {id, lat, lng, addr, note, region: undefined};
+    const rec = {id, lat, lng, addr, note, region: undefined, lastEditSource:'admin'};
     upsertRecord(rec);
     if(markerObjs[id]){
       markerObjs[id].record = rec;
       markerObjs[id].marker.setPosition(new kakao.maps.LatLng(lat,lng));
+      markerObjs[id].marker.setImage(pickLifesaverIcon(rec));
     } else {
       addMarkerToMap(rec);
     }
