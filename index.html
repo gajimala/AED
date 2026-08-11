@@ -300,7 +300,7 @@
   .ev-sternum{margin-top:10px;padding:10px;background:#FFF7E6;border:1px solid #FFD8A8;border-radius:12px;}
   .ev-sternum img{width:100%;border-radius:10px;display:block;margin-bottom:6px;}
   .ev-sternum span{font-size:13px;color:var(--ink);font-weight:700;line-height:1.4;display:block;text-align:center;}
-  .ev-voice{text-align:center;font-size:11.5px;color:var(--ink-soft);margin-top:8px;}
+  .ev-voice{text-align:left;font-size:10.5px;color:var(--ink-soft);margin-top:8px;background:#F4F7FA;border-radius:8px;padding:8px 10px;max-height:110px;overflow-y:auto;white-space:pre-wrap;font-family:ui-monospace,monospace;line-height:1.5;}
   .ev-summary{margin-top:10px;padding:10px 12px;background:#EFF6F8;border-radius:10px;}
   .ev-summary .t{font-size:12px;color:var(--navy);font-weight:700;margin-bottom:4px;}
   .ev-summary .v{font-size:12.5px;color:var(--navy);line-height:1.6;}
@@ -1970,6 +1970,7 @@ function switchEdu(name){
   // 말하면 바로 실행모드로 넘어가면서 동시에 압박까지 시작되게 함(cprVoiceQuickStart 참고).
   if(name==='cpr'){
     if(!cprAudioCtx) cprAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(typeof cprLogVoice==='function') cprLogVoice('CPR 탭 진입 — AudioContext state: '+cprAudioCtx.state);
     cprStartVoice();
   }
 }
@@ -2096,22 +2097,35 @@ function cprReallyStart(){
     cprClockTimer = setInterval(function(){ if(cprRunning){ cprElapsedSec++; cprRender(); } }, 1000);
   }, 1000);
 }
+let cprVoiceLog = []; // 세션이 여러 번 바뀌어도 안 지워지는 진단용 로그 — 종료→재진입 사이에 실제로 무슨 일이 있었는지 화면에서 그대로 확인 가능하게 함
+function cprLogVoice(msg){
+  const t = new Date();
+  const stamp = String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0')+'.'+String(t.getMilliseconds()).padStart(3,'0');
+  cprVoiceLog.push(`[${stamp}] ${msg}`);
+  if(cprVoiceLog.length > 25) cprVoiceLog.shift(); // 너무 길어지지 않게 최근 25줄만 유지
+  const el = document.getElementById('cprVoiceStatus');
+  if(el){ el.textContent = cprVoiceLog.join('\n'); el.scrollTop = el.scrollHeight; }
+}
+
 function cprStartVoice(){
-  if(cprRecognition) return; // 이미 켜져 있으면 다시 만들지 않음(중복 시작 방지)
+  cprLogVoice(`cprStartVoice() 호출됨 (cprRecognition=${cprRecognition ? '있음' : '없음'})`);
+  if(cprRecognition){ cprLogVoice('→ 이미 있어서 건너뜀'); return; } // 이미 켜져 있으면 다시 만들지 않음(중복 시작 방지)
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const statusEl = document.getElementById('cprVoiceStatus');
-  if(location.protocol === 'file:'){ statusEl.textContent='⚠️ 파일을 직접 열면 마이크 권한이 막혀 음성인식이 안 됩니다.'; return; }
-  if(!SR){ statusEl.textContent='🎙 이 브라우저는 음성인식을 지원하지 않습니다'; return; }
+  if(location.protocol === 'file:'){ cprLogVoice('⚠️ file: 프로토콜 — 마이크 권한 자체가 막힘'); return; }
+  if(!SR){ cprLogVoice('⚠️ 이 브라우저는 SpeechRecognition 미지원'); return; }
 
   let retryCount = 0;
   const MAX_RETRY = 5;
 
   function buildAndStart(){
+    cprLogVoice(`buildAndStart() 시도 ${retryCount+1}/${MAX_RETRY+1}`);
     const rec = new SR();
     rec.lang='ko-KR'; rec.continuous=true; rec.interimResults=false;
+    rec.onstart = function(){ cprLogVoice('✅ onstart — 실제로 듣기 시작함'); };
     rec.onresult = function(e){
       const said = e.results[e.results.length-1][0].transcript.trim();
-      statusEl.textContent = '🎙 들음: "'+said+'"';
+      cprLogVoice('🎙 들음: "'+said+'"');
       // 실행모드(cprExecArea)에 아직 안 들어갔으면(1~3단계 보는 중) 또는 들어갔어도 아직
       // "압박 시작" 버튼을 안 누른 준비화면이면 — 둘 다 "아직 압박이 실제로 시작되지 않은 상태".
       // 이 상태에서 "시작"이라고 한 번만 말하면, 단계를 건너뛰고 곧바로 실행모드 진입 + 압박 시작을
@@ -2134,39 +2148,42 @@ function cprStartVoice(){
     // ⚠️ 예전엔 오류가 나도 화면에 문구만 바뀌고 끝이라, 한 번 실패하면(특히 직전 세션의 마이크가
     // 아직 안 풀린 상태에서 재시작하려다 실패하는 경우) 그 뒤로는 계속 음성인식이 죽어있었음.
     // 이제 오류가 나도(치명적인 권한거부가 아니면) 잠깐 쉬었다가 자동으로 재시도함.
-    function scheduleRetry(){
+    function scheduleRetry(reason){
+      cprLogVoice(`scheduleRetry(${reason}) — cprRecognition===rec: ${cprRecognition===rec}, retryCount: ${retryCount}`);
       // cprRecognition이 이미 이 인스턴스가 아니면(cprStopAll로 정리됐으면) 재시도하지 않음
-      if(cprRecognition !== rec) return;
-      if(retryCount >= MAX_RETRY){ statusEl.textContent = '🎙 음성인식이 반복 실패했습니다. 화면을 나갔다 다시 들어와보세요.'; return; }
+      if(cprRecognition !== rec){ cprLogVoice('→ 이미 정리된 인스턴스라 재시도 안 함'); return; }
+      if(retryCount >= MAX_RETRY){ cprLogVoice('→ 최대 재시도 초과, 포기'); return; }
       retryCount++;
       // ⚠️ 바로 재시작하면 브라우저가 마이크를 아직 안 놓아준 상태일 수 있어 또 실패하기 쉬움 —
       // 짧게 쉬었다가(200ms) 재시도하면 실제 기기에서 훨씬 안정적으로 붙음.
       setTimeout(function(){
-        if(cprRecognition !== rec) return;
-        try{ rec.start(); }catch(err){ scheduleRetry(); }
+        if(cprRecognition !== rec){ cprLogVoice('→ (지연 후) 이미 정리된 인스턴스라 재시도 취소'); return; }
+        cprLogVoice(`→ ${retryCount}차 재시도 실행`);
+        try{ rec.start(); }catch(err){ cprLogVoice('→ 재시도 start() 즉시예외: '+err.message); scheduleRetry('재시도 예외'); }
       }, 200);
     }
     rec.onerror = function(e){
-      statusEl.textContent = '🎙 오류: '+e.error+(retryCount<MAX_RETRY ? ' (재시도 중…)' : '');
+      cprLogVoice('❌ onerror: '+e.error);
       if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
-        statusEl.textContent = '🎙 마이크 권한이 꺼져 있습니다. 브라우저 설정에서 허용해주세요.';
+        cprLogVoice('→ 권한 거부, 포기함');
         cprRecognition = null;
         return; // 권한 자체가 없으면 재시도해도 소용없음
       }
       // ⚠️ 예전엔 여기서 문구만 바꾸고 끝이라, 실제 기기에서 "마이크가 아직 안 풀렸다"는 실패가
       // (동기적으로 예외를 던지지 않고) 이 onerror 이벤트로만 비동기 전달되는 경우엔 재시도 자체가
       // 전혀 일어나지 않아 음성인식이 영영 안 켜지는 문제가 있었음. 이제 여기서도 재시도함.
-      scheduleRetry();
+      scheduleRetry('onerror:'+e.error);
     };
-    rec.onend = function(){ scheduleRetry(); };
+    rec.onend = function(){ cprLogVoice('🔚 onend'); scheduleRetry('onend'); };
     cprRecognition = rec; // onend/onerror의 "이 인스턴스가 아직 유효한가" 체크가 통과하도록 시도 전에 먼저 지정
     try{
       rec.start();
-      statusEl.textContent='🎙 음성인식 켜짐 — "시작" "정지" "제세동" "종료"';
+      cprLogVoice('→ start() 호출 성공(예외 없음)');
     }catch(e){
       // 시작 자체가 바로 실패하는 경우(직전 세션 마이크가 아직 안 풀렸을 때 흔함)도
       // onend와 동일하게 짧게 쉬었다가 재시도.
-      if(rec.onend) rec.onend();
+      cprLogVoice('→ start() 즉시예외: '+e.message);
+      scheduleRetry('최초 예외');
     }
   }
   buildAndStart();
@@ -2233,6 +2250,7 @@ function cprTick(){
 function cprLoop(){ cprTick(); const delay = cprPhase==='compress' ? 600 : 3000; cprBeatTimer=setTimeout(cprLoop, delay); }
 
 function cprStopAll(){
+  cprLogVoice('cprStopAll() 호출됨 (cprRecognition='+(cprRecognition?'있음':'없음')+')');
   cprRunning=false;
   if(cprBeatTimer) clearTimeout(cprBeatTimer);
   if(cprClockTimer) clearInterval(cprClockTimer);
