@@ -481,6 +481,9 @@
 
     <!-- 심폐소생술 -->
     <div class="edu-section active" id="edu-cpr">
+      <div style="background:#E7F7EE;border:1.5px solid #1E8E5A;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12.5px;color:#12222E;line-height:1.6;">
+        🎙 <b>이 화면은 음성으로도 조작할 수 있어요.</b> 위급 상황엔 화면을 만지지 않고 <b>"시작"</b> 또는 <b>"정지"</b>라고 말하면 바로 실행돼요.
+      </div>
       <div id="cprStepPanel"></div>
       <div class="ev-nav" id="cprStepNav">
         <button id="cprPrevBtn">이전</button>
@@ -511,8 +514,9 @@
           <img id="cprSternumImg" src="./icon/Edu/cpr_sternum.jpg" alt="복장뼈 위치">
           <span>압박 위치 — 복장뼈 아래쪽 절반</span>
         </div>
-        <button id="cprCopyLogBtn" onclick="cprCopyVoiceLog()" style="width:100%;margin-top:6px;background:#0FA3B1;color:#fff;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;">📋 진단 로그 복사하기</button>
-        <div class="ev-voice" id="cprVoiceStatus"></div>
+        <!-- 디버깅 완료 — 로그 자체는 계속 수집되지만(문제 생기면 다시 켤 수 있게) 화면엔 숨김 -->
+        <button id="cprCopyLogBtn" onclick="cprCopyVoiceLog()" style="display:none;width:100%;margin-top:6px;background:#0FA3B1;color:#fff;border:none;border-radius:8px;padding:9px;font-size:12.5px;font-weight:700;">📋 진단 로그 복사하기</button>
+        <div class="ev-voice" id="cprVoiceStatus" style="display:none;"></div>
         <div class="ev-summary">
           <div class="t">구급대 인계용 요약</div>
           <div class="v" id="cprSummary"></div>
