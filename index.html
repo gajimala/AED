@@ -96,6 +96,18 @@
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
   }
+  #nearestEntry{
+    position:fixed;right:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
+    width:40px;height:40px;border-radius:50%;background:var(--orange);color:#fff;
+    border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .nearest-card{
+    border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:#FBFDFE;
+  }
+  .nearest-card .dist{color:var(--teal);font-weight:800;font-size:15px;margin-bottom:4px;}
+  .nearest-card .name{font-weight:700;margin-bottom:2px;}
+  .nearest-card .addr{color:var(--ink-soft);font-size:12.5px;margin-bottom:10px;}
   #eduBar{
     position:fixed;left:14px;bottom:22px;z-index:500;
     display:flex;flex-direction:column;gap:8px;
@@ -344,6 +356,27 @@
 <button id="myLocationEntry" onclick="goToMyLocation()" title="내 위치로 가기">
   <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="3" fill="#fff"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="7" fill="none" stroke="#fff" stroke-width="2"/></svg>
 </button>
+
+<button id="nearestEntry" onclick="openNearestSheet()" title="가장 가까운 곳 찾기">
+  <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 2 14.5 9H21l-5.2 4.2L17.8 20 12 15.9 6.2 20l2-6.8L3 9h6.5z" fill="#fff"/></svg>
+</button>
+
+<!-- 가장 가까운 인명구조함/AED 찾기 -->
+<div class="overlay" id="nearestOverlay">
+  <div class="sheet" id="nearestSheet">
+    <div class="sheet-handle"></div>
+    <h2 style="margin:0 0 4px;">가장 가까운 곳 찾기</h2>
+    <div class="sub" style="margin-bottom:16px;">내 위치 기준으로 가장 가까운 곳을 찾아 바로 길찾기로 연결해드려요.</div>
+    <div class="btn-row" style="margin-bottom:10px;">
+      <button class="btn btn-primary" onclick="findNearestAndShow('lifesaver')">🛟 가장 가까운 인명구조함</button>
+    </div>
+    <div class="btn-row" style="margin-bottom:16px;">
+      <button class="btn btn-orange" onclick="findNearestAndShow('aed')">🚑 가장 가까운 AED</button>
+    </div>
+    <div id="nearestResult"></div>
+    <button class="btn btn-ghost" onclick="closeNearestSheet()">닫기</button>
+  </div>
+</div>
 
 <!-- 우측 하단 관리자 진입 아이콘 -->
 <div id="eduBar">
@@ -972,6 +1005,84 @@ async function initMap(){
 }
 
 // 우측 상단 버튼으로 언제든 다시 내 위치로 이동(한 번만, 강제 추적 아님)
+/* =========================================================
+   가장 가까운 인명구조함 / AED 찾기
+   ========================================================= */
+function openNearestSheet(){
+  document.getElementById('nearestResult').innerHTML = '';
+  document.getElementById('nearestOverlay').classList.add('show');
+}
+function closeNearestSheet(){
+  document.getElementById('nearestOverlay').classList.remove('show');
+}
+
+async function findNearestAndShow(kind){
+  const resultBox = document.getElementById('nearestResult');
+  resultBox.innerHTML = '<div class="hint">📍 내 위치 확인 중…</div>';
+
+  if(!navigator.geolocation){
+    resultBox.innerHTML = '<div class="msg err" style="display:block;">이 기기에서 위치 기능을 지원하지 않습니다.</div>';
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    const myLat = pos.coords.latitude, myLng = pos.coords.longitude;
+    if(kind === 'lifesaver'){
+      const all = loadRecords();
+      if(!all.length){ resultBox.innerHTML = '<div class="hint">구조함 데이터를 아직 불러오지 못했습니다.</div>'; return; }
+      let nearest=null, minDist=Infinity;
+      all.forEach(r=>{ const d = haversineMeters(myLat,myLng,r.lat,r.lng); if(d<minDist){minDist=d; nearest=r;} });
+      renderNearestResult({
+        name: nearest.addr || '인명구조함', addr: nearest.note || '', dist: minDist,
+        lat: nearest.lat, lng: nearest.lng
+      });
+    } else {
+      // ⚠️ AED는 "가장 가까운 곳"이 아니라 "가장 가까운, 지금 실제로 이용 가능한 곳"이어야 함.
+      // 문 닫힌 AED로 안내하면 응급상황에 오히려 위험하므로, 운영시간이 아닌 곳은 후보에서 제외함.
+      resultBox.innerHTML = '<div class="hint">🚑 주변 AED 확인 중…</div>';
+      try{
+        const regionName = await coord2RegionName(myLat, myLng);
+        if(!regionName || regionName==='기타'){
+          resultBox.innerHTML = '<div class="msg err" style="display:block;">현재 위치의 행정구역을 확인하지 못했습니다.</div>';
+          return;
+        }
+        const [sido, sigungu] = regionName.split(' ');
+        const cached = readAedCache(sido, sigungu);
+        const items = cached ? cached.items : await fetchAedFresh(sido, sigungu);
+        // 운영시간이 지금 아닌 곳(available===false)은 제외. 정보가 없는 곳(null)은 후보로 남겨둠.
+        const openItems = items.filter(a => isAedAvailableNow(a).available !== false);
+        if(!openItems.length){
+          resultBox.innerHTML = '<div class="msg err" style="display:block;">지금 이용 가능한 AED를 주변에서 찾지 못했습니다.</div>';
+          return;
+        }
+        let nearest=null, minDist=Infinity;
+        openItems.forEach(a=>{ const d = haversineMeters(myLat,myLng,a.lat,a.lng); if(d<minDist){minDist=d; nearest=a;} });
+        const status = isAedAvailableNow(nearest);
+        renderNearestResult({
+          name: nearest.name || 'AED', addr: (nearest.address||'') + (status.label ? ' · '+status.label : ''), dist: minDist,
+          lat: nearest.lat, lng: nearest.lng
+        });
+      }catch(e){
+        console.error('가까운 AED 조회 실패', e);
+        resultBox.innerHTML = '<div class="msg err" style="display:block;">AED 정보를 불러오지 못했습니다.</div>';
+      }
+    }
+  }, (err)=>{
+    resultBox.innerHTML = '<div class="msg err" style="display:block;">위치를 가져오지 못했습니다. 위치 권한을 확인해주세요.</div>';
+  }, { enableHighAccuracy:true, timeout:10000, maximumAge:10000 });
+}
+
+function renderNearestResult(r){
+  const distText = r.dist < 1000 ? `${Math.round(r.dist)}m` : `${(r.dist/1000).toFixed(1)}km`;
+  document.getElementById('nearestResult').innerHTML = `
+    <div class="nearest-card">
+      <div class="dist">📍 ${distText}</div>
+      <div class="name">${r.name}</div>
+      <div class="addr">${r.addr || ''}</div>
+      <button class="btn btn-primary btn-sm" onclick="openAedDirections(${r.lat},${r.lng},'${r.name.replace(/'/g,'')}')">🚗 여기로 길찾기</button>
+    </div>
+  `;
+}
+
 function goToMyLocation(){
   if(!navigator.geolocation){ alert('이 기기에서 위치 기능을 지원하지 않습니다.'); return; }
   navigator.geolocation.getCurrentPosition(
@@ -1365,6 +1476,99 @@ function parseAedXml(xmlText){
 }
 
 // 운영시간 정보를 바탕으로 "지금 이용 가능한지" 계산 (필드명 확정되면 그대로 동작)
+// 2026년 대한민국 법정공휴일·대체공휴일 목록(YYYY-MM-DD) — 음력 기반 명절 포함, 매년 갱신 필요.
+// 출처: 인사혁신처 「관공서의 공휴일에 관한 규정」 기준 2026년 달력.
+// ⚠️ 공휴일 판단 방식(27년부터 요청받은 구조):
+// 1) 고정 날짜 공휴일(신정·삼일절·어린이날·현충일·제헌절·광복절·개천절·한글날·성탄절)은
+//    매년 날짜가 같으므로 순수 계산으로 처리 — 갱신 필요 없음.
+// 2) 음력 명절(설날·추석·부처님오신날)은 매년 양력 날짜가 달라져서 순수 계산이 어려움
+//    (음력↔양력 변환은 윤달 계산이 필요한 천문 계산 영역). 대신 이미 확정 발표된
+//    날짜를 연도별로 표에 미리 채워둠 — 새 연도가 다가오면 이 표에만 추가하면 됨.
+// 3) 대체공휴일은 위 날짜들이 토/일과 겹칠 때만 자동으로 계산함(고정 규칙이라 매번 갱신 불필요).
+//    단, 현충일·신정·제헌절은 대체공휴일 적용 대상이 아님(법 규정).
+
+// 매년 고정 날짜(월-일)인 공휴일. 대체공휴일 적용 대상 여부도 함께 표시.
+const KR_FIXED_HOLIDAYS = [
+  {md:'01-01', name:'신정', substitute:false},
+  {md:'03-01', name:'삼일절', substitute:true},
+  {md:'05-05', name:'어린이날', substitute:true},
+  {md:'06-06', name:'현충일', substitute:false},
+  {md:'07-17', name:'제헌절', substitute:false},
+  {md:'08-15', name:'광복절', substitute:true},
+  {md:'10-03', name:'개천절', substitute:true},
+  {md:'10-09', name:'한글날', substitute:true},
+  {md:'12-25', name:'성탄절', substitute:true},
+];
+
+// 음력 명절 — 설날(전날·당일·다음날 3일), 추석(전날·당일·다음날 3일), 부처님오신날(당일 1일)의
+// "당일" 양력 날짜만 여기 적어두면 나머지(설날 전날/다음날, 추석 전날/다음날, 대체공휴일)는
+// 자동 계산됨. 새 연도가 다가오면 이 표에 그 해 값만 추가하면 됨(한국천문연구원 발표 기준).
+const KR_LUNAR_HOLIDAY_ANCHORS = {
+  2026: { seollal: '2026-02-17', chuseok: '2026-09-25', buddha: '2026-05-24' },
+  2027: { seollal: '2027-02-07', chuseok: '2027-09-15', buddha: '2027-05-13' },
+  // ⚠️ 2028년 이후는 아직 표에 없음 — 해가 다가오면 한국천문연구원 발표 기준으로 추가해야 함.
+  // 그 전까지는 해당 연도의 음력 명절만 정확한 날짜 판별이 안 될 수 있음(고정 공휴일은 정상 작동).
+};
+
+function addDays(dateStr, n){
+  const d = new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  return d.toISOString().slice(0,10);
+}
+function dowOf(dateStr){ return new Date(dateStr+'T00:00:00').getDay(); } // 0=일 ... 6=토
+
+// 주어진 공휴일 날짜(들)에 대해 대체공휴일을 계산함.
+// ⚠️ 설날·추석은 "일요일과 겹칠 때만"(토요일 겹침은 대상 아님) 대체공휴일이 발생하는
+// 별도 규정이 있음(관공서의 공휴일에 관한 규정 제3조) — sundayOnly 옵션으로 구분함.
+function computeSubstitute(holidaySet, datesToCheck, sundayOnly){
+  const overlaps = sundayOnly
+    ? datesToCheck.some(d => dowOf(d)===0)
+    : datesToCheck.some(d => dowOf(d)===0 || dowOf(d)===6);
+  if(!overlaps) return null;
+  let cand = addDays(datesToCheck[datesToCheck.length-1], 1);
+  while(dowOf(cand)===0 || dowOf(cand)===6 || holidaySet.has(cand)){
+    cand = addDays(cand, 1);
+  }
+  return cand;
+}
+
+function getKrHolidaySetForYear(year){
+  const set = new Set();
+  const subCandidates = []; // [{dates:[...], name}]
+
+  KR_FIXED_HOLIDAYS.forEach(h=>{
+    const dateStr = `${year}-${h.md}`;
+    set.add(dateStr);
+    if(h.substitute) subCandidates.push({dates:[dateStr], name:h.name});
+  });
+
+  const anchors = KR_LUNAR_HOLIDAY_ANCHORS[year];
+  if(anchors){
+    const seol = [addDays(anchors.seollal,-1), anchors.seollal, addDays(anchors.seollal,1)];
+    const chu = [addDays(anchors.chuseok,-1), anchors.chuseok, addDays(anchors.chuseok,1)];
+    seol.forEach(d=>set.add(d)); chu.forEach(d=>set.add(d)); set.add(anchors.buddha);
+    subCandidates.push({dates:seol, name:'설날'});
+    subCandidates.push({dates:chu, name:'추석'});
+    subCandidates.push({dates:[anchors.buddha], name:'부처님오신날'});
+  }
+
+  // 대체공휴일 계산(고정+음력 공휴일 전부 등록된 뒤에 계산해야 "다른 공휴일과 안 겹치는 날"을 정확히 찾음)
+  subCandidates.forEach(c=>{
+    const sundayOnly = (c.name === '설날' || c.name === '추석');
+    const sub = computeSubstitute(set, c.dates, sundayOnly);
+    if(sub) set.add(sub);
+  });
+
+  return set;
+}
+
+function isKrHolidayToday(){
+  const now = new Date();
+  const year = now.getFullYear();
+  const iso = `${year}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  return getKrHolidaySetForYear(year).has(iso);
+}
+
 function isAedAvailableNow(a){
   const now = new Date();
   const day = now.getDay(); // 0=일 1=월 ... 6=토
@@ -1372,10 +1576,16 @@ function isAedAvailableNow(a){
     [a.sunStart, a.sunEnd], [a.monStart, a.monEnd], [a.tueStart, a.tueEnd],
     [a.wedStart, a.wedEnd], [a.thuStart, a.thuEnd], [a.friStart, a.friEnd], [a.satStart, a.satEnd]
   ];
-  const [startStr, endStr] = byDay[day];
-  // ⚠️ 공휴일이면 holStart/holEnd를 써야 더 정확하지만, 공휴일 여부 판별에는
-  // 별도 달력 데이터가 필요해서 이번 버전에서는 요일 기준으로만 판단합니다.
-  if(!startStr || !endStr) return { available:null, label:'운영시간 정보 없음' };
+  // 오늘이 공휴일(대체공휴일 포함)이면 요일별 시간 대신 holStart/holEnd(공휴일 운영시간)를 사용함.
+  const [startStr, endStr] = isKrHolidayToday() ? [a.holStart, a.holEnd] : byDay[day];
+  if(!startStr || !endStr){
+    // 다른 요일엔 운영시간 정보가 있는데 오늘만 비어있으면 → "정보 없음"이 아니라
+    // "오늘(이 요일)은 휴무"로 판단하는 게 더 정확함(주말 휴무 등). 모든 요일이 다
+    // 비어있을 때만 진짜 "정보 자체가 없음"으로 처리함.
+    const anyDayHasHours = byDay.some(([s,e]) => s && e);
+    if(anyDayHasHours) return { available:false, label: isKrHolidayToday() ? '오늘은 공휴일 휴무' : '오늘은 운영하지 않음' };
+    return { available:null, label:'운영시간 정보 없음' };
+  }
   const pad = s => s.padStart(4,'0');
   const nowMin = now.getHours()*60 + now.getMinutes();
   const toMin = s => parseInt(pad(s).slice(0,2))*60 + parseInt(pad(s).slice(2,4));
