@@ -98,9 +98,10 @@
   }
   #nearestEntry{
     position:fixed;right:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
-    width:40px;height:40px;border-radius:50%;background:var(--orange);color:#fff;
+    height:36px;padding:0 14px;border-radius:20px;background:var(--orange);color:#fff;
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:800;white-space:nowrap;
   }
   .nearest-card{
     border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:#FBFDFE;
@@ -357,9 +358,7 @@
   <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="3" fill="#fff"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="7" fill="none" stroke="#fff" stroke-width="2"/></svg>
 </button>
 
-<button id="nearestEntry" onclick="openNearestSheet()" title="가장 가까운 곳 찾기">
-  <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 2 14.5 9H21l-5.2 4.2L17.8 20 12 15.9 6.2 20l2-6.8L3 9h6.5z" fill="#fff"/></svg>
-</button>
+<button id="nearestEntry" onclick="openNearestSheet()" title="가까운곳 찾기">가까운곳 찾기</button>
 
 <!-- 가장 가까운 인명구조함/AED 찾기 -->
 <div class="overlay" id="nearestOverlay">
@@ -1073,6 +1072,10 @@ async function findNearestAndShow(kind){
 
 function renderNearestResult(r){
   const distText = r.dist < 1000 ? `${Math.round(r.dist)}m` : `${(r.dist/1000).toFixed(1)}km`;
+  // 결과를 찾으면(카드만 보여주는 게 아니라) 지도 자체를 그 위치로 바로 옮겨줌 —
+  // 시트를 닫았을 때 이미 그 자리가 보이게 하기 위함.
+  map.setCenter(new kakao.maps.LatLng(r.lat, r.lng));
+  map.setLevel(4);
   document.getElementById('nearestResult').innerHTML = `
     <div class="nearest-card">
       <div class="dist">📍 ${distText}</div>
