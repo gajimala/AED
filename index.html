@@ -1476,89 +1476,27 @@ function parseAedXml(xmlText){
 }
 
 // 운영시간 정보를 바탕으로 "지금 이용 가능한지" 계산 (필드명 확정되면 그대로 동작)
-// 2026년 대한민국 법정공휴일·대체공휴일 목록(YYYY-MM-DD) — 음력 기반 명절 포함, 매년 갱신 필요.
-// 출처: 인사혁신처 「관공서의 공휴일에 관한 규정」 기준 2026년 달력.
-// ⚠️ 공휴일 판단 방식(27년부터 요청받은 구조):
-// 1) 고정 날짜 공휴일(신정·삼일절·어린이날·현충일·제헌절·광복절·개천절·한글날·성탄절)은
-//    매년 날짜가 같으므로 순수 계산으로 처리 — 갱신 필요 없음.
-// 2) 음력 명절(설날·추석·부처님오신날)은 매년 양력 날짜가 달라져서 순수 계산이 어려움
-//    (음력↔양력 변환은 윤달 계산이 필요한 천문 계산 영역). 대신 이미 확정 발표된
-//    날짜를 연도별로 표에 미리 채워둠 — 새 연도가 다가오면 이 표에만 추가하면 됨.
-// 3) 대체공휴일은 위 날짜들이 토/일과 겹칠 때만 자동으로 계산함(고정 규칙이라 매번 갱신 불필요).
-//    단, 현충일·신정·제헌절은 대체공휴일 적용 대상이 아님(법 규정).
-
-// 매년 고정 날짜(월-일)인 공휴일. 대체공휴일 적용 대상 여부도 함께 표시.
-const KR_FIXED_HOLIDAYS = [
-  {md:'01-01', name:'신정', substitute:false},
-  {md:'03-01', name:'삼일절', substitute:true},
-  {md:'05-05', name:'어린이날', substitute:true},
-  {md:'06-06', name:'현충일', substitute:false},
-  {md:'07-17', name:'제헌절', substitute:false},
-  {md:'08-15', name:'광복절', substitute:true},
-  {md:'10-03', name:'개천절', substitute:true},
-  {md:'10-09', name:'한글날', substitute:true},
-  {md:'12-25', name:'성탄절', substitute:true},
-];
-
-// 음력 명절 — 설날(전날·당일·다음날 3일), 추석(전날·당일·다음날 3일), 부처님오신날(당일 1일)의
-// "당일" 양력 날짜만 여기 적어두면 나머지(설날 전날/다음날, 추석 전날/다음날, 대체공휴일)는
-// 자동 계산됨. 새 연도가 다가오면 이 표에 그 해 값만 추가하면 됨(한국천문연구원 발표 기준).
-const KR_LUNAR_HOLIDAY_ANCHORS = {
-  2026: { seollal: '2026-02-17', chuseok: '2026-09-25', buddha: '2026-05-24' },
-  2027: { seollal: '2027-02-07', chuseok: '2027-09-15', buddha: '2027-05-13' },
-  // ⚠️ 2028년 이후는 아직 표에 없음 — 해가 다가오면 한국천문연구원 발표 기준으로 추가해야 함.
-  // 그 전까지는 해당 연도의 음력 명절만 정확한 날짜 판별이 안 될 수 있음(고정 공휴일은 정상 작동).
+// 2026~2027년 대한민국 법정공휴일 전체 목록(YYYY-MM-DD) — 대체공휴일까지 이미 다 반영된 최종 날짜들.
+// 출처: 인사혁신처 「관공서의 공휴일에 관한 규정」 공식 발표 달력.
+// ⚠️ 굳이 매번 계산할 필요 없음(대체공휴일 규칙까지 포함해서 정부가 이미 확정 발표하니까) —
+// 그냥 그 결과를 그대로 표에 적어두면 끝. 새 연도가 다가오면 이 표에 그 해 날짜만 추가하면 됨.
+const KR_HOLIDAYS_BY_YEAR = {
+  2026: ["2026-01-01","2026-02-16","2026-02-17","2026-02-18","2026-03-01","2026-03-02",
+         "2026-05-05","2026-05-24","2026-05-25","2026-06-06","2026-07-17","2026-08-15",
+         "2026-08-17","2026-09-24","2026-09-25","2026-09-26","2026-10-03","2026-10-05",
+         "2026-10-09","2026-12-25"],
+  2027: ["2027-01-01","2027-02-06","2027-02-07","2027-02-08","2027-02-09","2027-03-01",
+         "2027-05-05","2027-05-13","2027-06-06","2027-07-17","2027-08-15","2027-08-16",
+         "2027-09-14","2027-09-15","2027-09-16","2027-10-03","2027-10-04","2027-10-09",
+         "2027-10-11","2027-12-25","2027-12-27"],
+  // ⚠️ 2028년 이후는 아직 표에 없음 — 인사혁신처가 그 해 달력을 발표하면 여기에 추가.
 };
 
-function addDays(dateStr, n){
-  const d = new Date(dateStr+'T00:00:00');
-  d.setDate(d.getDate()+n);
-  return d.toISOString().slice(0,10);
-}
-function dowOf(dateStr){ return new Date(dateStr+'T00:00:00').getDay(); } // 0=일 ... 6=토
-
-// 주어진 공휴일 날짜(들)에 대해 대체공휴일을 계산함.
-// ⚠️ 설날·추석은 "일요일과 겹칠 때만"(토요일 겹침은 대상 아님) 대체공휴일이 발생하는
-// 별도 규정이 있음(관공서의 공휴일에 관한 규정 제3조) — sundayOnly 옵션으로 구분함.
-function computeSubstitute(holidaySet, datesToCheck, sundayOnly){
-  const overlaps = sundayOnly
-    ? datesToCheck.some(d => dowOf(d)===0)
-    : datesToCheck.some(d => dowOf(d)===0 || dowOf(d)===6);
-  if(!overlaps) return null;
-  let cand = addDays(datesToCheck[datesToCheck.length-1], 1);
-  while(dowOf(cand)===0 || dowOf(cand)===6 || holidaySet.has(cand)){
-    cand = addDays(cand, 1);
-  }
-  return cand;
-}
-
+const _krHolidayCache = {};
 function getKrHolidaySetForYear(year){
-  const set = new Set();
-  const subCandidates = []; // [{dates:[...], name}]
-
-  KR_FIXED_HOLIDAYS.forEach(h=>{
-    const dateStr = `${year}-${h.md}`;
-    set.add(dateStr);
-    if(h.substitute) subCandidates.push({dates:[dateStr], name:h.name});
-  });
-
-  const anchors = KR_LUNAR_HOLIDAY_ANCHORS[year];
-  if(anchors){
-    const seol = [addDays(anchors.seollal,-1), anchors.seollal, addDays(anchors.seollal,1)];
-    const chu = [addDays(anchors.chuseok,-1), anchors.chuseok, addDays(anchors.chuseok,1)];
-    seol.forEach(d=>set.add(d)); chu.forEach(d=>set.add(d)); set.add(anchors.buddha);
-    subCandidates.push({dates:seol, name:'설날'});
-    subCandidates.push({dates:chu, name:'추석'});
-    subCandidates.push({dates:[anchors.buddha], name:'부처님오신날'});
-  }
-
-  // 대체공휴일 계산(고정+음력 공휴일 전부 등록된 뒤에 계산해야 "다른 공휴일과 안 겹치는 날"을 정확히 찾음)
-  subCandidates.forEach(c=>{
-    const sundayOnly = (c.name === '설날' || c.name === '추석');
-    const sub = computeSubstitute(set, c.dates, sundayOnly);
-    if(sub) set.add(sub);
-  });
-
+  if(_krHolidayCache[year]) return _krHolidayCache[year];
+  const set = new Set(KR_HOLIDAYS_BY_YEAR[year] || []);
+  _krHolidayCache[year] = set;
   return set;
 }
 
