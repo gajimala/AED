@@ -97,8 +97,8 @@
     display:flex;align-items:center;justify-content:center;
   }
   #nearestEntry{
-    position:fixed;right:62px;top:calc(14px + env(safe-area-inset-top));z-index:500;
-    height:40px;padding:0 14px;border-radius:20px;background:var(--orange);color:#fff;
+    position:fixed;left:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
+    height:36px;padding:0 14px;border-radius:20px;background:var(--orange);color:#fff;
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
     font-size:13px;font-weight:800;white-space:nowrap;
@@ -631,8 +631,8 @@
           <div><label>위도 (예: 37.7912)</label><input type="text" id="newLat" placeholder="37.xxxxxx" oninput="onNewLatLngTyped()"></div>
           <div><label>경도 (예: 128.9229)</label><input type="text" id="newLng" placeholder="128.xxxxxx" oninput="onNewLatLngTyped()"></div>
         </div>
-        <div class="row"><div><label>주소 / 위치 설명</label><input type="text" id="newAddr" placeholder="강릉시 강동면 안인진리 159-60"></div></div>
-        <div class="row"><div><label>비고 (선택)</label><input type="text" id="newNote" placeholder="방파제(TTP) 등"></div></div>
+        <div class="row"><div><label>주소 / 위치 설명</label><input type="text" id="newAddr" placeholder="예시) 강릉시 강동면 안인진리 159-60"></div></div>
+        <div class="row"><div><label>비고 (선택)</label><input type="text" id="newNote" placeholder="예시) 방파제(TTP) 등"></div></div>
         <button class="btn btn-primary" onclick="addSingle()">구조함 등록</button>
       </div>
     </div>
@@ -980,6 +980,7 @@ async function initMap(){
   await ensureLoaded();           // lifesavers.json(또는 저장된 값) 로딩 완료까지 대기
   renderAllMarkers();
   document.getElementById('splash').classList.add('hide');   // 로딩 끝난 뒤에 스플래시 제거
+  setTimeout(alignNearestButtonUnderAed, 0); // 최초 렌더링 직후 위치 확정(순수 화면측정, API 호출 없음)
 
   geocoder = new kakao.maps.services.Geocoder();
   populateRegionSelect();
@@ -1251,6 +1252,20 @@ async function classifyMissingRegions(){
   if(document.getElementById('panel-bulkEdit')?.classList.contains('active')) buildBulkEditTable();
 }
 
+// "가까운곳 찾기" 버튼을 "AED 표시" 버튼 바로 아래(같은 왼쪽 시작 위치)로 정확히 맞춤.
+// ⚠️ 네트워크 요청이 전혀 없는 순수 화면 측정(getBoundingClientRect)이라 지도 로딩·API
+// 호출 횟수·앱 구동 속도에 아무 영향 없음. "전체" 드롭다운의 폭이 지역명 길이에 따라
+// 달라질 때도 AED 버튼 실제 위치를 그대로 따라가게 함.
+function alignNearestButtonUnderAed(){
+  const aedBtn = document.getElementById('aedToggleBtn');
+  const nearestBtn = document.getElementById('nearestEntry');
+  if(!aedBtn || !nearestBtn) return;
+  const rect = aedBtn.getBoundingClientRect();
+  if(rect.width === 0) return; // 아직 화면에 안 그려졌으면(display:none 등) 건너뜀
+  nearestBtn.style.left = Math.round(rect.left) + 'px';
+}
+window.addEventListener('resize', alignNearestButtonUnderAed);
+
 function populateRegionSelect(){
   const all = loadRecords();
   const counts = {};
@@ -1264,6 +1279,7 @@ function populateRegionSelect(){
   sel.innerHTML = opts.join('');
   sel.value = counts[prevValue] ? prevValue : 'all';
   currentRegionFilter = sel.value;
+  setTimeout(alignNearestButtonUnderAed, 0); // 드롭다운 폭이 바뀔 수 있는 시점 직후 재정렬(연산 자체는 여전히 순수 화면측정)
 }
 
 function onRegionChange(){
@@ -3091,19 +3107,20 @@ async function revertChange(id){
       if(entry.targetId) await deleteRecord(entry.targetId);
     } else if(entry.type === 'delete'){
       // 삭제를 되돌림 = 예전 좌표로 다시 등록(내부적으로 새 id가 생김 — 예전 id는 복구 불가)
-      const rec = {id:newId(), lat:entry.oldLat, lng:entry.oldLng, addr:entry.addr||'', note:''};
+      const rec = {id:newId(), lat:entry.oldLat, lng:entry.oldLng, addr:entry.addr||'', note:'', lastEditSource:'admin'};
       await upsertRecord(rec);
       addMarkerToMap(rec);
     } else { // edit — 예전 좌표로 되돌림
       if(entry.targetId && markerObjs[entry.targetId]){
-        const rec = {...markerObjs[entry.targetId].record, lat:entry.oldLat, lng:entry.oldLng, region: undefined};
+        const rec = {...markerObjs[entry.targetId].record, lat:entry.oldLat, lng:entry.oldLng, region: undefined, lastEditSource:'admin'};
         await upsertRecord(rec);
         markerObjs[entry.targetId].record = rec;
         markerObjs[entry.targetId].marker.setPosition(new kakao.maps.LatLng(entry.oldLat, entry.oldLng));
+        markerObjs[entry.targetId].marker.setImage(pickLifesaverIcon(rec));
       } else if(entry.targetId){
         // 화면에 아직 안 그려진 상태(다른 지역 필터 등)일 수 있어 데이터만이라도 갱신
         const rec = loadRecords().find(r=>r.id===entry.targetId);
-        if(rec) await upsertRecord({...rec, lat:entry.oldLat, lng:entry.oldLng, region: undefined});
+        if(rec) await upsertRecord({...rec, lat:entry.oldLat, lng:entry.oldLng, region: undefined, lastEditSource:'admin'});
       }
     }
     clusterer.redraw();
@@ -3176,7 +3193,7 @@ function parseBulkNew(){
     <button class="btn btn-orange" style="margin-top:8px;" id="confirmBulkBtn">전체 등록하기</button>
   `;
   document.getElementById('confirmBulkBtn').onclick = ()=>{
-    parsed.forEach(rec=>{ upsertRecord(rec); addMarkerToMap(rec); });
+    parsed.forEach(rec=>{ rec.lastEditSource='admin'; upsertRecord(rec); addMarkerToMap(rec); });
     classifyMissingRegions();
     if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(붙여넣기) — ${parsed.length}건 등록`);
     msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
@@ -3258,7 +3275,7 @@ function parseBulkNewExcel(evt){
     msg.className='msg ok'; msg.style.display='block';
     preview.innerHTML = `<button class="btn btn-orange" style="margin-top:10px;" id="confirmExcelBtn">${parsed.length}건 전체 등록하기</button>`;
     document.getElementById('confirmExcelBtn').onclick = ()=>{
-      parsed.forEach(rec=>{ upsertRecord(rec); addMarkerToMap(rec); });
+      parsed.forEach(rec=>{ rec.lastEditSource='admin'; upsertRecord(rec); addMarkerToMap(rec); });
       classifyMissingRegions();
       if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(엑셀) — ${parsed.length}건 등록`);
       msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`;
@@ -3322,7 +3339,8 @@ function importBulkEditExcel(evt){
         const rec = {
           id:newId(), lat, lng,
           addr: iAddr>-1 ? String(row[iAddr]||'') : '',
-          note: iNote>-1 ? String(row[iNote]||'') : ''
+          note: iNote>-1 ? String(row[iNote]||'') : '',
+          lastEditSource:'admin'
         };
         upsertRecord(rec);
         addMarkerToMap(rec);
@@ -3332,12 +3350,13 @@ function importBulkEditExcel(evt){
           id, lat, lng,
           addr: iAddr>-1 ? String(row[iAddr]||'') : byId[id].addr,
           note: iNote>-1 ? String(row[iNote]||'') : byId[id].note,
-          region: undefined
+          region: undefined, lastEditSource:'admin'
         };
         upsertRecord(rec);
         if(markerObjs[id]){
           markerObjs[id].record = rec;
           markerObjs[id].marker.setPosition(new kakao.maps.LatLng(lat,lng));
+          markerObjs[id].marker.setImage(pickLifesaverIcon(rec));
         }
         updated++;
       }
