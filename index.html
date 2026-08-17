@@ -1096,10 +1096,14 @@ function renderNearestResult(r){
   map.setCenter(new kakao.maps.LatLng(r.lat, r.lng));
   map.setLevel(4);
 
-  // ⚠️ 지도만 이동하고 정작 "어디가 그 자리인지" 표시가 없어서 다른 마커들 사이에 묻혀
-  // 안 보이는 문제가 있었음 — 펄스(깜빡이는 원) 오버레이로 정확한 위치를 눈에 띄게 강조함.
   if(nearestHighlightMarker) nearestHighlightMarker.setMap(null);
-  const highlightHtml = `<div class="nearest-pulse"></div>`;
+  // ⚠️ 외부 CSS 클래스/변수에 의존하면 카카오 오버레이 안에서 제대로 안 먹힐 수 있어서,
+  // 스타일을 전부 인라인으로 직접 넣어 외부 스타일시트 의존을 없앰(더 확실하게 보이게).
+  const highlightHtml = `
+    <div style="position:relative;width:22px;height:22px;">
+      <div style="position:absolute;inset:0;border-radius:50%;background:#FF6B35;opacity:.55;animation:nearestPulse 1.4s ease-out infinite;"></div>
+      <div style="position:absolute;inset:0;border-radius:50%;background:#FF6B35;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div>
+    </div>`;
   nearestHighlightMarker = new kakao.maps.CustomOverlay({
     position: new kakao.maps.LatLng(r.lat, r.lng),
     content: highlightHtml,
