@@ -61,16 +61,19 @@
   /* ---------- 좌측 상단 행정구역 필터 ---------- */
   #regionBar{
     position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
+    display:flex;align-items:center;flex-wrap:nowrap;max-width:calc(100vw - 28px);
   }
   #regionBar select{
     background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:20px;
-    padding:9px 14px;font-size:13px;font-weight:700;color:var(--navy);
-    box-shadow:0 2px 10px rgba(0,0,0,.12);max-width:60vw;
+    padding:clamp(7px,1.8vw,11px) clamp(8px,2.4vw,18px);font-size:clamp(9px,2.9vw,17px);font-weight:700;color:var(--navy);
+    box-shadow:0 2px 10px rgba(0,0,0,.12);
+    flex-shrink:1;min-width:0;white-space:nowrap;
   }
   #aedToggleBtn{
-    margin-left:8px;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:20px;
-    padding:9px 14px;font-size:13px;font-weight:700;color:var(--danger);
+    margin-left:clamp(4px,1.5vw,8px);background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:20px;
+    padding:clamp(7px,1.8vw,11px) clamp(8px,2.4vw,18px);font-size:clamp(9px,2.9vw,17px);font-weight:700;color:var(--danger);
     box-shadow:0 2px 10px rgba(0,0,0,.12);cursor:pointer;
+    flex-shrink:0;white-space:nowrap;
   }
   #aedToggleBtn.on{background:var(--danger);color:#fff;border-color:var(--danger);}
   #aedInfoBox{
@@ -98,10 +101,10 @@
   }
   #nearestEntry{
     position:fixed;left:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
-    height:36px;padding:0 14px;border-radius:20px;background:var(--orange);color:#fff;
+    height:clamp(30px,8.5vw,46px);padding:0 clamp(8px,2.4vw,18px);border-radius:20px;background:var(--orange);color:#fff;
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
-    font-size:13px;font-weight:800;white-space:nowrap;
+    font-size:clamp(9px,2.9vw,17px);font-weight:800;white-space:nowrap;
   }
   .nearest-card{
     border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:#FBFDFE;
@@ -565,7 +568,7 @@
       <div class="ev-subtab" id="gearSubtab">
         <div class="ev-subtab-item" data-i="0">🛟 구명환</div>
         <div class="ev-subtab-item" data-i="4">🦺 구명조끼</div>
-        <div class="ev-subtab-item" data-i="11">🎯 드로우백</div>
+        <div class="ev-subtab-item" data-i="9">🎯 드로우백</div>
       </div>
       <div id="gearStepPanel"></div>
       <div class="ev-nav">
@@ -1263,6 +1266,10 @@ function alignNearestButtonUnderAed(){
   const rect = aedBtn.getBoundingClientRect();
   if(rect.width === 0) return; // 아직 화면에 안 그려졌으면(display:none 등) 건너뜀
   nearestBtn.style.left = Math.round(rect.left) + 'px';
+  // ⚠️ 세로 위치도 고정값(62px) 대신, AED 버튼의 실제 아래쪽 끝 + 여백으로 계산함.
+  // 큰 화면에서 글자·버튼이 커지면 첫 줄 자체가 높아지는데, 고정값이면 그만큼 겹칠 수 있어서
+  // 실제 크기를 그대로 따라가게 함(마찬가지로 순수 화면측정, API 호출 없음).
+  nearestBtn.style.top = Math.round(rect.bottom + 8) + 'px';
 }
 window.addEventListener('resize', alignNearestButtonUnderAed);
 
@@ -2189,13 +2196,11 @@ const gearSteps = [
   {img:'./icon/Edu/ring2.jpg', badge:'구명환 2/4', title:'로프 끝을 잡습니다', desc:'구명환에 연결된 줄 끝을 손에 단단히 감아쥔 뒤, 바람·물살이 흘러오는 방향(상류) 쪽에서 던질 준비를 합니다.'},
   {img:'./icon/Edu/ring3.jpg', badge:'구명환 3/4', title:'익수자 뒤쪽을 향해 던집니다', desc:'정면이 아닌 뒤쪽으로 던져야 대상자가 팔을 뻗어 잡기 쉽습니다.'},
   {img:'./icon/Edu/ring4.jpg', badge:'구명환 4/4', title:'익수자가 잡으면 끌어당깁니다', desc:'구명환을 양팔로 안거나 팔을 끼우게 한 뒤, 천천히 끌어당겨 안전한 곳으로 이동시킵니다.'},
-  {img:'./icon/Edu/vest1.jpg', badge:'구명조끼 1/7', title:'체격에 맞는 사이즈 확인', desc:'조끼를 펼쳐서 몸에 대보고 크기를 확인합니다. 너무 크면 물에 빠졌을 때 조끼만 위로 벗겨져 얼굴이 물에 잠길 수 있습니다. 어린이는 체중에 맞는 유아·아동용을 사용하세요.'},
-  {img:'./icon/Edu/vest2.jpg', badge:'구명조끼 2/7', title:'머리 위로 뒤집어 입기', desc:'앞여밈이 없는 형태는 머리 위로 뒤집어써서 입습니다. 앞면이 몸 중앙에 잘 맞는지 확인합니다.'},
-  {img:'./icon/Edu/vest4.jpg', badge:'구명조끼 3/7', title:'지퍼(앞여밈) 끝까지 잠그기', desc:'지퍼나 버클을 맨 위까지 완전히 채웁니다. 중간까지만 잠그면 물살에 벌어져 벗겨질 수 있습니다.'},
-  {img:'./icon/Edu/vest5.jpg', badge:'구명조끼 4/7', title:'가슴·허리 스트랩 전부 채우고 조이기', desc:'가슴 → 허리 순서로 모든 버클을 채운 뒤, 양쪽 끈을 당겨 몸에 밀착시킵니다. 손가락 한두 마디가 들어갈 정도가 적당합니다.'},
-  {img:'./icon/Edu/vest7.jpg', badge:'구명조끼 5/7 ⚠️중요', title:'다리끈(가랑이끈) 반드시 채우기', desc:'다리끈은 선택이 아니라 필수입니다. 안 채우면 조끼가 몸통을 타고 위로 밀려 올라가 얼굴까지 덮거나 벗겨질 수 있습니다 — 실제 익수 사고에서 가장 흔한 원인입니다.'},
-  {img:'./icon/Edu/vest6.jpg', badge:'구명조끼 6/7', title:'양팔을 위로 들어 당겨보기', desc:'양팔을 위로 쭉 들어올려 봅니다. 조끼가 제자리에 있으면 정상(OK). 턱이나 귀까지 밀려 올라오면 너무 헐거운 것(NG)이니 스트랩(특히 다리끈)을 더 조이세요.'},
-  {img:'./icon/Edu/vest3.jpg', badge:'구명조끼 7/7', title:'최종 점검', desc:'버클이 모두 잠겼는지, 스트랩이 꼬이지 않았는지, 다리끈이 반드시 채워져 있는지 확인합니다. 어깨를 눌러봤을 때 귀가 눌리지 않고 편안하면 올바른 착용입니다.'},
+  {img:'./icon/Edu/vest1.jpg', badge:'구명조끼 1/5', title:'가슴버클 정확히 채우기', desc:'가슴버클을 \'딸깍\' 소리가 나게 정확히 채웁니다. 소리가 안 나면 완전히 잠기지 않은 것이니 다시 확인하세요.'},
+  {img:'./icon/Edu/vest2.jpg', badge:'구명조끼 2/5', title:'가슴조임끈 당겨 밀착시키기', desc:'가슴조임끈을 당겨 몸에 밀착시킵니다. 헐거우면 물에 빠졌을 때 조끼가 위로 밀려 올라갈 수 있습니다.'},
+  {img:'./icon/Edu/vest3.jpg', badge:'구명조끼 3/5 ⚠️중요', title:'다리끈(생명줄)을 연결합니다', desc:'다리 사이로 통과시킨 다리끈 버클을 딸깍 소리가 나게 채워 줍니다. 이 다리끈은 선택이 아니라 필수입니다 — 안 하면 조끼가 몸통을 타고 위로 밀려 올라가 얼굴까지 덮거나 벗겨질 수 있습니다.'},
+  {img:'./icon/Edu/vest4.jpg', badge:'구명조끼 4/5', title:'다리끈(생명줄) 조이고 고정 확인', desc:'다리끈을 단단히 조이고 고정되었는지 확인합니다. 헐겁게 남아있으면 실제 상황에서 제 역할을 못 할 수 있습니다.'},
+  {img:'./icon/Edu/vest5.jpg', badge:'구명조끼 5/5', title:'양팔 들어 최종 확인', desc:'양팔을 위로 들어 구명조끼가 고정이 잘되었는지 확인합니다. 조끼가 제자리에 있으면 정상(OK). 턱이나 귀까지 밀려 올라오면 너무 헐거운 것(NG)이니 스트랩을 더 조이세요.'},
   {img:'./icon/Edu/bag1.jpg', badge:'드로우백 1/4', title:'드로우백을 꺼냅니다', desc:'가방을 열어 로프가 코일 형태로 가지런히 들어있는지 확인합니다(엉켜있으면 던졌을 때 안 풀립니다).'},
   {img:'./icon/Edu/bag2.jpg', badge:'드로우백 2/4', title:'로프 끝을 잡습니다', desc:'로프와 드로우백은 연결되어 있습니다. 반대쪽 로프 끝을 손목이나 손에 확실히 고정합니다.'},
   {img:'./icon/Edu/bag3.jpg', badge:'드로우백 3/4', title:'던지면 로프가 풀려나옵니다', desc:'가방만 던지고 로프 끝은 절대 놓지 마세요. 대상자를 향해 언더핸드로 던집니다.'},
@@ -2247,7 +2252,7 @@ function initEduViewers(){
 }
 // 지금 보고 있는 스텝이 구명환/구명조끼/드로우백 중 어디 구간인지에 맞춰 서브탭 강조 표시를 갱신
 function updateGearSubtab(idx){
-  const bounds = [0,4,11,gearSteps.length]; // 구명환[0-3] 구명조끼[4-10] 드로우백[11-14]
+  const bounds = [0,4,9,gearSteps.length]; // 구명환[0-3] 구명조끼[4-8] 드로우백[9-12]
   let section = 0;
   if(idx >= bounds[2]) section = 2; else if(idx >= bounds[1]) section = 1;
   document.querySelectorAll('#gearSubtab .ev-subtab-item').forEach(function(el, i){
