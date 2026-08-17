@@ -106,6 +106,20 @@
     display:flex;align-items:center;justify-content:center;
     font-size:clamp(9px,2.9vw,17px);font-weight:800;white-space:nowrap;
   }
+  .nearest-pulse{
+    width:22px;height:22px;border-radius:50%;background:var(--orange);
+    border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);
+    position:relative;
+  }
+  .nearest-pulse::after{
+    content:'';position:absolute;inset:-3px;border-radius:50%;
+    background:var(--orange);opacity:.55;
+    animation:nearestPulse 1.4s ease-out infinite;
+  }
+  @keyframes nearestPulse{
+    0%{ transform:scale(1); opacity:.55; }
+    100%{ transform:scale(2.6); opacity:0; }
+  }
   .nearest-card{
     border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:#FBFDFE;
   }
@@ -1074,12 +1088,29 @@ async function findNearestAndShow(kind){
   }, { enableHighAccuracy:true, timeout:10000, maximumAge:10000 });
 }
 
+let nearestHighlightMarker = null;
 function renderNearestResult(r){
   const distText = r.dist < 1000 ? `${Math.round(r.dist)}m` : `${(r.dist/1000).toFixed(1)}km`;
   // 결과를 찾으면(카드만 보여주는 게 아니라) 지도 자체를 그 위치로 바로 옮겨줌 —
   // 시트를 닫았을 때 이미 그 자리가 보이게 하기 위함.
   map.setCenter(new kakao.maps.LatLng(r.lat, r.lng));
   map.setLevel(4);
+
+  // ⚠️ 지도만 이동하고 정작 "어디가 그 자리인지" 표시가 없어서 다른 마커들 사이에 묻혀
+  // 안 보이는 문제가 있었음 — 펄스(깜빡이는 원) 오버레이로 정확한 위치를 눈에 띄게 강조함.
+  if(nearestHighlightMarker) nearestHighlightMarker.setMap(null);
+  const highlightHtml = `<div class="nearest-pulse"></div>`;
+  nearestHighlightMarker = new kakao.maps.CustomOverlay({
+    position: new kakao.maps.LatLng(r.lat, r.lng),
+    content: highlightHtml,
+    zIndex: 10, yAnchor: 0.5, xAnchor: 0.5
+  });
+  nearestHighlightMarker.setMap(map);
+  clearTimeout(window._nearestHighlightTimer);
+  window._nearestHighlightTimer = setTimeout(()=>{
+    if(nearestHighlightMarker){ nearestHighlightMarker.setMap(null); nearestHighlightMarker = null; }
+  }, 8000); // 계속 깜빡이면 거슬릴 수 있어서 8초 후 자동으로 없어짐
+
   document.getElementById('nearestResult').innerHTML = `
     <div class="nearest-card">
       <div class="dist">📍 ${distText}</div>
