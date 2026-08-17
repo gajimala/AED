@@ -307,6 +307,10 @@
   /* ---------- 안전교육 카드뷰어(한 장씩 넘기기) + CPR 실행모드 ---------- */
   .ev-panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;min-height:340px;display:flex;flex-direction:column;}
   .ev-img{width:100%;height:auto;max-height:320px;object-fit:contain;border-radius:12px;margin-bottom:12px;border:1px solid var(--line);background:#fff;display:block;}
+  /* ⚠️ 압박 실행화면은 cpr4/cpr5(압박)·cpr6(호흡)·cpr7(제세동) 이미지를 실시간으로 계속 바꿔가며
+     보여주는데, 원본 이미지들의 세로 크기가 미세하게 달라서 height:auto로는 바뀔 때마다 아래
+     버튼 위치가 조금씩 흔들려 누르기 어려웠음. 여기서만 높이를 고정해서 흔들림 자체를 없앰. */
+  #cprPhaseImg{height:220px;max-height:220px;}
   .ev-badge{align-self:center;font-size:13px;font-weight:700;padding:5px 14px;border-radius:20px;margin-bottom:10px;background:#EFF6F8;color:var(--navy);}
   .ev-badge.breath{background:#E7F7EE;color:#1E8E5A;}
   .ev-title{font-size:16px;font-weight:800;text-align:center;margin:2px 0 6px;}
@@ -1092,7 +1096,6 @@ let nearestHighlightMarker = null;
 function renderNearestResult(r){
   const distText = r.dist < 1000 ? `${Math.round(r.dist)}m` : `${(r.dist/1000).toFixed(1)}km`;
   try{
-  console.log('[가까운곳] renderNearestResult 시작', r);
   // 결과를 찾으면(카드만 보여주는 게 아니라) 지도 자체를 그 위치로 바로 옮겨줌 —
   // 시트를 닫았을 때 이미 그 자리가 보이게 하기 위함.
   const targetLatLng = new kakao.maps.LatLng(r.lat, r.lng);
@@ -1105,7 +1108,6 @@ function renderNearestResult(r){
   const latSpan = b.getNorthEast().getLat() - b.getSouthWest().getLat();
   const offsetCenter = new kakao.maps.LatLng(r.lat - latSpan*0.22, r.lng);
   map.setCenter(offsetCenter);
-  console.log('[가까운곳] 지도 이동 완료');
 
   if(nearestHighlightMarker) nearestHighlightMarker.setMap(null);
   // ⚠️ 외부 CSS 클래스/변수에 의존하면 카카오 오버레이 안에서 제대로 안 먹힐 수 있어서,
@@ -1121,14 +1123,12 @@ function renderNearestResult(r){
     zIndex: 10, yAnchor: 0.5, xAnchor: 0.5
   });
   nearestHighlightMarker.setMap(map);
-  console.log('[가까운곳] 강조 마커 생성 및 지도 부착 완료', nearestHighlightMarker);
   clearTimeout(window._nearestHighlightTimer);
   window._nearestHighlightTimer = setTimeout(()=>{
     if(nearestHighlightMarker){ nearestHighlightMarker.setMap(null); nearestHighlightMarker = null; }
   }, 8000); // 계속 깜빡이면 거슬릴 수 있어서 8초 후 자동으로 없어짐
   }catch(e){
-    console.error('[가까운곳] renderNearestResult 중 오류:', e);
-    alert('강조 표시 생성 중 오류: ' + e.message); // 진단용 — 실제 오류를 화면에서 바로 보여줌
+    console.error('가까운곳 강조 표시 생성 실패', e); // 조용히 콘솔에만 기록(화면 방해 없음)
     return;
   }
 
