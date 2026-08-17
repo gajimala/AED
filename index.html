@@ -1091,10 +1091,21 @@ async function findNearestAndShow(kind){
 let nearestHighlightMarker = null;
 function renderNearestResult(r){
   const distText = r.dist < 1000 ? `${Math.round(r.dist)}m` : `${(r.dist/1000).toFixed(1)}km`;
+  try{
+  console.log('[가까운곳] renderNearestResult 시작', r);
   // 결과를 찾으면(카드만 보여주는 게 아니라) 지도 자체를 그 위치로 바로 옮겨줌 —
   // 시트를 닫았을 때 이미 그 자리가 보이게 하기 위함.
-  map.setCenter(new kakao.maps.LatLng(r.lat, r.lng));
+  const targetLatLng = new kakao.maps.LatLng(r.lat, r.lng);
   map.setLevel(4);
+  map.setCenter(targetLatLng); // 일단 이 레벨에서의 화면 범위를 얻기 위해 정확한 위치로 먼저 이동
+  // ⚠️ 결과 시트(하단 패널)가 화면의 상당 부분을 덮을 수 있어서, 지도 정중앙에 두면 그 뒤에
+  // 가려져 안 보이는 문제가 있었음. 시트 위(화면에 실제로 보이는 영역)로 중심을 살짝 옮겨서
+  // 강조 표시가 시트에 가리지 않고 확실히 보이게 함.
+  const b = map.getBounds();
+  const latSpan = b.getNorthEast().getLat() - b.getSouthWest().getLat();
+  const offsetCenter = new kakao.maps.LatLng(r.lat - latSpan*0.22, r.lng);
+  map.setCenter(offsetCenter);
+  console.log('[가까운곳] 지도 이동 완료');
 
   if(nearestHighlightMarker) nearestHighlightMarker.setMap(null);
   // ⚠️ 외부 CSS 클래스/변수에 의존하면 카카오 오버레이 안에서 제대로 안 먹힐 수 있어서,
@@ -1105,15 +1116,21 @@ function renderNearestResult(r){
       <div style="position:absolute;inset:0;border-radius:50%;background:#FF6B35;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div>
     </div>`;
   nearestHighlightMarker = new kakao.maps.CustomOverlay({
-    position: new kakao.maps.LatLng(r.lat, r.lng),
+    position: targetLatLng,
     content: highlightHtml,
     zIndex: 10, yAnchor: 0.5, xAnchor: 0.5
   });
   nearestHighlightMarker.setMap(map);
+  console.log('[가까운곳] 강조 마커 생성 및 지도 부착 완료', nearestHighlightMarker);
   clearTimeout(window._nearestHighlightTimer);
   window._nearestHighlightTimer = setTimeout(()=>{
     if(nearestHighlightMarker){ nearestHighlightMarker.setMap(null); nearestHighlightMarker = null; }
   }, 8000); // 계속 깜빡이면 거슬릴 수 있어서 8초 후 자동으로 없어짐
+  }catch(e){
+    console.error('[가까운곳] renderNearestResult 중 오류:', e);
+    alert('강조 표시 생성 중 오류: ' + e.message); // 진단용 — 실제 오류를 화면에서 바로 보여줌
+    return;
+  }
 
   document.getElementById('nearestResult').innerHTML = `
     <div class="nearest-card">
