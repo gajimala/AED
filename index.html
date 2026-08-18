@@ -3386,14 +3386,50 @@ function parseBulkNewExcel(evt){
 /* ---------------- 대량수정: 엑셀 내보내기/가져오기 (구분: 신규/수정/삭제) ---------------- */
 function exportToExcel(){
   const list = loadRecords();
-  const rows = [['id','구분','주소','위도','경도','비고'], ['', '신규(예시)', '강동면 안인진리 000-0', '37.000000', '128.900000', '']];
-  list.forEach(r=> rows.push([r.id, '', r.addr||'', r.lat, r.lng, r.note||'']));
+  const history = loadRequests().filter(r => r.status==='approved' || r.status==='auto_approved');
+  const sourceLabel = (s)=> s==='admin' ? '관리자' : s==='civilian' ? '민간인' : '원본데이터';
+  const fmtDate = (ms)=> ms ? new Date(ms).toLocaleString('ko-KR') : '';
+
+  // 각 구조함(targetId)별로 가장 최근 수정(edit) 이력을 찾아서 "수정 전" 값으로 사용
+  const lastEditByTarget = {};
+  history.filter(h=>h.type==='edit').forEach(h=>{
+    const prev = lastEditByTarget[h.targetId];
+    if(!prev || (h.resolvedAt||0) > (prev.resolvedAt||0)) lastEditByTarget[h.targetId] = h;
+  });
+
+  const header = ['id','구분','주소','위도','경도','비고','최근 등록/수정 주체','최근 수정 시각','수정 전 주소','수정 전 좌표'];
+  const rows = [header, ['', '신규(예시)', '강동면 안인진리 000-0', '37.000000', '128.900000', '', '', '', '', '']];
+  const strikeRowIdx = []; // 취소선 스타일을 적용할 행 번호(0-based, header 포함 기준) 기록
+
+  list.forEach(r=>{
+    const prevEdit = lastEditByTarget[r.id];
+    const prevAddr = prevEdit ? (prevEdit.addr || '') : '';
+    const prevCoord = prevEdit && prevEdit.oldLat!=null ? `${prevEdit.oldLat},${prevEdit.oldLng}` : '';
+    rows.push([r.id, '', r.addr||'', r.lat, r.lng, r.note||'', sourceLabel(r.lastEditSource), fmtDate(r.updatedAt), prevAddr, prevCoord]);
+  });
+
+  // ⚠️ 삭제된 구조함은 lifesavers.json에서는 이미 사라졌지만, 이력(history)에는 "삭제 당시
+  // 마지막 상태"가 그대로 남아있음 — 이걸 엑셀에도 같이 보여주되, 취소선과 "삭제됨" 표시로
+  // 구분해서 "이미 없어진 항목"이라는 게 한눈에 보이게 함.
+  history.filter(h=>h.type==='delete').forEach(h=>{
+    rows.push([h.targetId, '삭제됨', h.addr||'', h.oldLat, h.oldLng, '', sourceLabel(h.source), fmtDate(h.resolvedAt), '', '']);
+    strikeRowIdx.push(rows.length-1);
+  });
+
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [{wch:14},{wch:12},{wch:34},{wch:14},{wch:14},{wch:18}];
+  ws['!cols'] = [{wch:14},{wch:10},{wch:32},{wch:13},{wch:13},{wch:16},{wch:14},{wch:19},{wch:28},{wch:20}];
+  // 삭제된 행은 빨간 글자로 표시해서 한눈에 구분되게 함(취소선 대신, 라이브러리 호환성 문제 없이 확실하게 보임)
+  strikeRowIdx.forEach(rIdx=>{
+    for(let c=0;c<header.length;c++){
+      const cellRef = XLSX.utils.encode_cell({r:rIdx, c});
+      if(ws[cellRef]) ws[cellRef].s = { font:{ color:{rgb:'CC0000'}, bold:true } };
+    }
+  });
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '구조함목록');
   const ts = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `구조함_목록_${ts}.xlsx`);
+  XLSX.writeFile(wb, `구조함_목록_${ts}.xlsx`, { cellStyles: true });
 }
 function importBulkEditExcel(evt){
   const file = evt.target.files[0];
