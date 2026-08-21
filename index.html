@@ -1520,9 +1520,55 @@ async function fetchAedFresh(sido, sigungu){
     all = all.concat(items);
     if(all.length >= totalCount || items.length < PAGE_SIZE) break; // 더 가져올 게 없으면 중단
   }
+  flagAedCoordOutliers(all); // ⚠️ 카카오 API 추가 호출 없이, 같은 시/군/구 내 다른 AED들과 비교해서 좌표 이상치만 표시해둠
   try{ localStorage.setItem(AED_CACHE_PREFIX + sido + '_' + sigungu, JSON.stringify({ fetchedAt: Date.now(), items: all })); }
   catch(e){ console.warn('AED 캐시 저장 실패(용량 초과 등) — 다음에도 다시 조회됨', e); }
   return all;
+}
+
+// ⚠️ 좌표 이상치 감지 — 추가 API 호출 없이 순수 계산만으로 판단함.
+// 같은 시/군/구로 조회된 AED들은 원래 서로 비슷한 범위 안에 모여있어야 정상인데, 그중 유독
+// 동떨어진(예: 바다 한가운데처럼) 좌표가 있으면 "주소는 있지만 좌표만 잘못됐을 가능성이 높은"
+// 이상치로 표시해둠. 실제로 확인된 사례(한국남부발전 삼척빛드림본부 AED)처럼 원본 공공데이터
+// 자체의 좌표 오류를 걸러내기 위함 — 표시만 다르게 하고 주소 정보는 그대로 보여줘서 위치를
+// 찾는 데는 지장 없게 함.
+function flagAedCoordOutliers(items){
+  if(items.length < 4) return; // 표본이 너무 적으면 통계적 판단이 무의미함
+  const lats = items.map(a=>a.lat).sort((a,b)=>a-b);
+  const lngs = items.map(a=>a.lng).sort((a,b)=>a-b);
+  const median = arr => arr[Math.floor(arr.length/2)];
+  const medLat = median(lats), medLng = median(lngs);
+  items.forEach(a=>{
+    const distKm = haversineMeters(a.lat, a.lng, medLat, medLng) / 1000;
+    a.coordSuspicious = distKm > 15; // 같은 시/군/구 내에서 중앙값으로부터 15km 넘게 떨어지면 의심
+  });
+
+  // 이상치로 걸러진 것만(전체가 아님 — 카카오 API 절약) 주소로 좌표를 다시 찾아 자동 보정 시도.
+  // 월 300만 건 무료 한도 중 이상치 몇 건 정도만 추가로 쓰는 거라 사실상 비용 부담 없음.
+  const suspicious = items.filter(a=>a.coordSuspicious && a.address);
+  suspicious.forEach(a=>{
+    addressSearchToCoord(a.address).then(fixed=>{
+      if(fixed){
+        a.origLat = a.lat; a.origLng = a.lng; // 원본 좌표는 참고용으로 남겨둠
+        a.lat = fixed.lat; a.lng = fixed.lng;
+        a.coordAutoFixed = true;
+        if(aedState.markers.length) renderAllMarkers(); // 이미 그려진 상태면 보정된 위치로 다시 그림
+      }
+    });
+  });
+}
+
+// 주소 문자열로 좌표를 찾아옴(좌표→주소의 반대 방향). 실패하면 null.
+function addressSearchToCoord(address){
+  return new Promise(resolve=>{
+    geocoder.addressSearch(address, (result, status)=>{
+      if(status === kakao.maps.services.Status.OK && result.length){
+        resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) });
+      } else {
+        resolve(null);
+      }
+    });
+  });
 }
 function parseAedXml(xmlText){
   const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
@@ -1666,10 +1712,14 @@ function showAedInfo(a){
   const status = isAedAvailableNow(a);
   const badgeColor = status.available===true ? '#1E8E5A' : status.available===false ? 'var(--danger)' : 'var(--ink-soft)';
   const box = document.getElementById('aedInfoBox');
+  const fixedNote = a.coordAutoFixed
+    ? `<div style="color:var(--orange);font-size:12px;margin-bottom:6px;">📍 원본 데이터의 좌표 오류가 의심되어, 등록된 주소 기준으로 위치를 자동 보정해서 표시했습니다.</div>`
+    : '';
   box.innerHTML = `
     <button id="aedInfoClose" onclick="closeAedInfo()">✕</button>
     <div style="font-weight:700;margin-bottom:4px;padding-right:20px;">🚑 ${a.name}</div>
     <div style="color:var(--ink-soft);margin-bottom:6px;">${a.address}${a.place ? ' · '+a.place : ''}</div>
+    ${fixedNote}
     <div style="color:${badgeColor};font-weight:700;margin-bottom:10px;">${status.label}</div>
     <button class="btn btn-primary btn-sm" onclick="openAedDirections(${a.lat},${a.lng},'${(a.name||'AED').replace(/'/g,"")}')">🚗 이 AED로 길찾기</button>
   `;
