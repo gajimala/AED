@@ -1005,8 +1005,8 @@ async function initMap(){
   aedClusterer = new kakao.maps.MarkerClusterer({
     map: map,
     averageCenter: true,
-    minLevel: 7,
-    gridSize: 70,
+    minLevel: 5,  // ⚠️ 예전엔 7이라 해안선처럼 넓게 퍼진 지역에서 어중간한 축척에서도 개별 표출돼 혼잡했음
+    gridSize: 120, // ⚠️ 예전엔 70이라 해안선 따라 붙어있어도 격자 칸이 갈려서 묶이지 않는 경우가 많았음
     disableClickZoom: false,
     calculator: [10, 50, 100],
     styles: [
@@ -1532,10 +1532,12 @@ function readAedCache(sido, sigungu){
   try{
     const cached = JSON.parse(localStorage.getItem(AED_CACHE_PREFIX + sido + '_' + sigungu));
     if(cached && Date.now() - cached.fetchedAt < AED_CACHE_TTL_MS){
-      // ⚠️ 버그였던 부분: 캐시에서 불러올 땐 이상치 검사 자체가 실행이 안 됐음 — 캐시가
-      // 24시간 유지되다 보니, 이 검사 로직을 새로 넣거나 고쳐도 캐시가 만료될 때까지는
-      // 전혀 적용이 안 되는 상태였음. 캐시 경로에서도 반드시 같이 돌게 함.
-      flagAedCoordOutliers(cached.items);
+      // ⚠️ fetchAedFresh에서 이제 보정이 다 끝난 뒤에 캐시를 저장하므로, 캐시 안 항목에는
+      // 이미 coordSuspicious 여부가 다 계산돼 들어있음. 이미 처리된 항목까지 매번 다시
+      // 검사하면(카카오 API 재호출) 캐시를 쓰는 의미가 없어지므로, 아직 한 번도 검사 안 된
+      // 항목(이전 버전에서 저장된 캐시 등 예외 상황 대비)만 골라서 검사함.
+      const unchecked = cached.items.filter(a => a.coordSuspicious === undefined);
+      if(unchecked.length) flagAedCoordOutliers(unchecked);
       return cached;
     }
   }catch(e){}
@@ -1559,7 +1561,9 @@ async function fetchAedFresh(sido, sigungu){
     all = all.concat(items);
     if(all.length >= totalCount || items.length < PAGE_SIZE) break; // 더 가져올 게 없으면 중단
   }
-  flagAedCoordOutliers(all); // ⚠️ 카카오 API 추가 호출 없이, 같은 시/군/구 내 다른 AED들과 비교해서 좌표 이상치만 표시해둠
+  await flagAedCoordOutliers(all); // ⚠️ 보정이 끝나길 기다린 뒤에 캐시를 저장해야, 그 결과(이상치 여부·보정된 좌표)가
+                                     // 캐시에 같이 저장됨 — 예전엔 이걸 기다리지 않고 먼저 저장해버려서, 캐시가
+                                     // 살아있는 24시간 내내 볼 때마다 이 검사를 매번 처음부터 다시 하고 있었음.
   try{ localStorage.setItem(AED_CACHE_PREFIX + sido + '_' + sigungu, JSON.stringify({ fetchedAt: Date.now(), items: all })); }
   catch(e){ console.warn('AED 캐시 저장 실패(용량 초과 등) — 다음에도 다시 조회됨', e); }
   return all;
@@ -1571,42 +1575,41 @@ async function fetchAedFresh(sido, sigungu){
 // 이상치로 표시해둠. 실제로 확인된 사례(한국남부발전 삼척빛드림본부 AED)처럼 원본 공공데이터
 // 자체의 좌표 오류를 걸러내기 위함 — 표시만 다르게 하고 주소 정보는 그대로 보여줘서 위치를
 // 찾는 데는 지장 없게 함.
-function flagAedCoordOutliers(items){
-  // 방법1: 같은 지역 안 다른 AED들과 비교(중앙값에서 너무 멀면 의심) — 지역 내 AED 개수가
-  // 적거나 지역 모양이 길쭉하면 판단이 애매할 수 있어서, 방법2와 같이 적용함.
-  let medLat=null, medLng=null;
-  if(items.length >= 4){
-    const lats = items.map(a=>a.lat).sort((a,b)=>a-b);
-    const lngs = items.map(a=>a.lng).sort((a,b)=>a-b);
-    const median = arr => arr[Math.floor(arr.length/2)];
-    medLat = median(lats); medLng = median(lngs);
-  }
-  // 방법2: 지금 지도가 보고 있는 중심(map center) 기준 — GPS 권한 없이도 항상 쓸 수 있고,
-  // "지금 이 화면에서 보기엔 말도 안 되게 먼 곳"을 직접적으로 걸러낼 수 있음.
-  let viewLat=null, viewLng=null;
-  try{ const c = map.getCenter(); viewLat = c.getLat(); viewLng = c.getLng(); }catch(e){}
-
-  items.forEach(a=>{
-    let suspicious = false;
-    if(medLat!=null){ const d = haversineMeters(a.lat, a.lng, medLat, medLng)/1000; if(d > 15) suspicious = true; }
-    if(viewLat!=null){ const d = haversineMeters(a.lat, a.lng, viewLat, viewLng)/1000; if(d > 20) suspicious = true; }
-    a.coordSuspicious = suspicious;
-  });
-
-  // 이상치로 걸러진 것만(전체가 아님 — 카카오 API 절약) 주소로 좌표를 다시 찾아 자동 보정 시도.
-  // 월 300만 건 무료 한도 중 이상치 몇 건 정도만 추가로 쓰는 거라 사실상 비용 부담 없음.
-  const suspicious = items.filter(a=>a.coordSuspicious && a.address);
-  suspicious.forEach(a=>{
-    addressSearchToCoord(a.address).then(fixed=>{
-      if(fixed){
-        a.origLat = a.lat; a.origLng = a.lng; // 원본 좌표는 참고용으로 남겨둠
-        a.lat = fixed.lat; a.lng = fixed.lng;
-        a.coordAutoFixed = true;
-        // ⚠️ 예전엔 여기서 renderAllMarkers()(인명구조함 3,647개 전체 재렌더링)를 잘못 호출하고
-        // 있었음 — AED 좌표 보정이랑 인명구조함은 전혀 무관한데 매번 무거운 전체 재구성이
-        // 일어나서 낭비였음. AED 전용 클러스터러만 갱신하도록 수정함(훨씬 가벼움).
-        if(aedClusterer){ clearAedMarkers(); prepareOverlapCheckCache(); items.forEach(item=>renderAedMarker(item)); }
+// ⚠️ AED 전용 함수 — 인명구조함 데이터는 전혀 건드리지 않음.
+// 예전 방식(주변 AED들과 거리 비교)은 해안선처럼 원래 넓게 퍼져있는 게 정상인 지역에서는
+// "바다로 살짝 벗어난 것" 정도를 거리 차이로 못 잡아냈음. 대신 각 AED 좌표를 실제 좌표→주소
+// 역변환(coord2Address)에 넣어봐서, 정상적으로 육지 주소가 나오면 정상, 아예 결과가 없으면
+// (바다·미개발지 등 행정구역이 없는 지점) 확실하게 "육지가 아님"으로 판단함 — 훨씬 정확함.
+async function flagAedCoordOutliers(items){
+  const CONCURRENCY = 8; // 한꺼번에 너무 많이 요청하면 카카오 API가 거절할 수 있어 묶음 단위로 처리
+  for(let i=0; i<items.length; i+=CONCURRENCY){
+    const batch = items.slice(i, i+CONCURRENCY);
+    await Promise.all(batch.map(async a=>{
+      const onLand = await isOnLand(a.lat, a.lng);
+      a.coordSuspicious = !onLand;
+      if(!onLand && a.address){
+        const fixed = await addressSearchToCoord(a.address);
+        if(fixed){
+          a.origLat = a.lat; a.origLng = a.lng; // 원본 좌표는 참고용으로 남겨둠
+          a.lat = fixed.lat; a.lng = fixed.lng;
+          a.coordAutoFixed = true;
+        }
       }
+    }));
+  }
+  // ⚠️ 예전엔 여기서 renderAllMarkers()(인명구조함 3,647개 전체 재렌더링)를 잘못 호출하고
+  // 있었음 — AED 좌표 보정이랑 인명구조함은 전혀 무관한데 매번 무거운 전체 재구성이
+  // 일어나서 낭비였음. AED 전용 클러스터러만 갱신하도록 수정함(훨씬 가벼움).
+  if(aedClusterer && items.some(a=>a.coordAutoFixed)){
+    clearAedMarkers(); prepareOverlapCheckCache(); items.forEach(item=>renderAedMarker(item));
+  }
+}
+
+// 좌표가 실제 육지(유효한 행정구역이 존재하는 지점)인지 확인. 바다·행정구역 밖이면 false.
+function isOnLand(lat, lng){
+  return new Promise(resolve=>{
+    geocoder.coord2RegionCode(lng, lat, (result, status)=>{
+      resolve(status === kakao.maps.services.Status.OK && result.length > 0);
     });
   });
 }
