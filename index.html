@@ -998,6 +998,25 @@ async function initMap(){
     ]
   });
 
+  // ⚠️ AED 전용 클러스터러 — 예전엔 AED가 클러스터링 없이 개별 마커로만 표시돼서, 지도를
+  // 축소해(넓은 범위를 볼 때) AED가 많은 지역에선 아이콘이 잔뜩 겹쳐 보였음. 인명구조함과
+  // 똑같은 방식으로 숫자 뱃지 클러스터링을 적용하되, 색상만 빨간 계열로 구분해서 "이건 AED
+  // 클러스터"라는 걸 구별할 수 있게 함.
+  aedClusterer = new kakao.maps.MarkerClusterer({
+    map: map,
+    averageCenter: true,
+    minLevel: 7,
+    gridSize: 70,
+    disableClickZoom: false,
+    calculator: [10, 50, 100],
+    styles: [
+      {width:'32px',height:'32px',background:'rgba(224,49,49,.88)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'32px',fontSize:'12px',fontWeight:'700',border:'2px solid #fff'},
+      {width:'40px',height:'40px',background:'rgba(198,40,40,.88)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'40px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff'},
+      {width:'48px',height:'48px',background:'rgba(165,29,29,.9)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'48px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff'},
+      {width:'58px',height:'58px',background:'rgba(122,18,18,.92)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'58px',fontSize:'14px',fontWeight:'700',border:'2px solid #fff'}
+    ]
+  });
+
   await ensureLoaded();           // lifesavers.json(또는 저장된 값) 로딩 완료까지 대기
   renderAllMarkers();
   document.getElementById('splash').classList.add('hide');   // 로딩 끝난 뒤에 스플래시 제거
@@ -1357,6 +1376,7 @@ const AED_SERVICE_KEY_ENCODED = 'TUbUhIiFWVRorR5hyktEuzY05oGV0Wd%2FTohPPdjOB27lU
 const AED_API_URL = 'https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire';
 
 let aedState = { on:false, markers:[] };
+let aedClusterer = null;
 let _lastAedRenderedKey = null; // 지금 화면에 떠 있는 AED 목록의 서명 — 내용이 같으면 다시 안 그려서 깜빡임 없앰
 let _lastAedBoundsKey = null, _lastAedRegions = null; // 행정구역 조회 결과 캐시(같은 화면범위 재조회 방지)
 
@@ -1372,7 +1392,7 @@ function toggleAedLayer(){
 }
 
 function clearAedMarkers(){
-  aedState.markers.forEach(m=>m.setMap(null));
+  if(aedClusterer) aedClusterer.clear();
   aedState.markers = [];
   document.getElementById('aedInfoBox').classList.remove('show');
 }
@@ -1396,6 +1416,18 @@ async function loadAedForCurrentRegion(){
 
   if(!map){
     setAedInfoMsg('⚠️ 지도가 아직 준비되지 않았습니다. 화면 위쪽에 지도 로딩 에러 배너가 떠 있는지 확인해주세요 (카카오 앱키/도메인 등록 문제일 수 있어요).');
+    return;
+  }
+
+  // ⚠️ 전국 축척처럼 너무 축소된 상태에서는, 지금 방식(화면 모서리 4곳+중심만 표본 조회)으로는
+  // 딱 그 5곳이 속한 지역의 AED만 반쪽짜리로 나오고 나머지는 빈 화면이 되는 어색한 상태가 됨.
+  // 클러스터링을 써도 이건 "그리기 부담"만 줄여줄 뿐, "제대로 다 안 보이는" 문제 자체는
+  // 해결이 안 되므로, 너무 축소된 단계에서는 아예 조회를 하지 않고 안내만 보여줌
+  // (지도 서비스들이 일반적으로 쓰는 방식과 동일).
+  const AED_MIN_ZOOM_LEVEL = 10; // 카카오맵 레벨: 숫자가 클수록 더 축소된 상태
+  if(map.getLevel() > AED_MIN_ZOOM_LEVEL){
+    clearAedMarkers();
+    setAedInfoMsg('🔍 지도를 조금 더 확대하면 주변 AED가 표시됩니다.');
     return;
   }
   // ⚠️ 예전엔 여기서 매번 "불러오는 중…" 안내상자를 띄웠는데, 캐시가 있어서 사실상 즉시 뜨는
@@ -1485,6 +1517,7 @@ function renderAedItems(items){
   clearAedMarkers();
   if(!items.length) return;
   closeAedInfo(); // 마커가 여러 개 뜨는 정상 케이스면 안내 박스는 닫아서 지도를 가리지 않게 함
+  prepareOverlapCheckCache(); // 겹침 검사용 캐시를 한 번만 준비(성능 최적화)
   items.forEach(item=>renderAedMarker(item));
 }
 
@@ -1498,7 +1531,13 @@ const AED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 이 시간이 지나면 캐시�
 function readAedCache(sido, sigungu){
   try{
     const cached = JSON.parse(localStorage.getItem(AED_CACHE_PREFIX + sido + '_' + sigungu));
-    if(cached && Date.now() - cached.fetchedAt < AED_CACHE_TTL_MS) return cached;
+    if(cached && Date.now() - cached.fetchedAt < AED_CACHE_TTL_MS){
+      // ⚠️ 버그였던 부분: 캐시에서 불러올 땐 이상치 검사 자체가 실행이 안 됐음 — 캐시가
+      // 24시간 유지되다 보니, 이 검사 로직을 새로 넣거나 고쳐도 캐시가 만료될 때까지는
+      // 전혀 적용이 안 되는 상태였음. 캐시 경로에서도 반드시 같이 돌게 함.
+      flagAedCoordOutliers(cached.items);
+      return cached;
+    }
   }catch(e){}
   return null;
 }
@@ -1533,14 +1572,25 @@ async function fetchAedFresh(sido, sigungu){
 // 자체의 좌표 오류를 걸러내기 위함 — 표시만 다르게 하고 주소 정보는 그대로 보여줘서 위치를
 // 찾는 데는 지장 없게 함.
 function flagAedCoordOutliers(items){
-  if(items.length < 4) return; // 표본이 너무 적으면 통계적 판단이 무의미함
-  const lats = items.map(a=>a.lat).sort((a,b)=>a-b);
-  const lngs = items.map(a=>a.lng).sort((a,b)=>a-b);
-  const median = arr => arr[Math.floor(arr.length/2)];
-  const medLat = median(lats), medLng = median(lngs);
+  // 방법1: 같은 지역 안 다른 AED들과 비교(중앙값에서 너무 멀면 의심) — 지역 내 AED 개수가
+  // 적거나 지역 모양이 길쭉하면 판단이 애매할 수 있어서, 방법2와 같이 적용함.
+  let medLat=null, medLng=null;
+  if(items.length >= 4){
+    const lats = items.map(a=>a.lat).sort((a,b)=>a-b);
+    const lngs = items.map(a=>a.lng).sort((a,b)=>a-b);
+    const median = arr => arr[Math.floor(arr.length/2)];
+    medLat = median(lats); medLng = median(lngs);
+  }
+  // 방법2: 지금 지도가 보고 있는 중심(map center) 기준 — GPS 권한 없이도 항상 쓸 수 있고,
+  // "지금 이 화면에서 보기엔 말도 안 되게 먼 곳"을 직접적으로 걸러낼 수 있음.
+  let viewLat=null, viewLng=null;
+  try{ const c = map.getCenter(); viewLat = c.getLat(); viewLng = c.getLng(); }catch(e){}
+
   items.forEach(a=>{
-    const distKm = haversineMeters(a.lat, a.lng, medLat, medLng) / 1000;
-    a.coordSuspicious = distKm > 15; // 같은 시/군/구 내에서 중앙값으로부터 15km 넘게 떨어지면 의심
+    let suspicious = false;
+    if(medLat!=null){ const d = haversineMeters(a.lat, a.lng, medLat, medLng)/1000; if(d > 15) suspicious = true; }
+    if(viewLat!=null){ const d = haversineMeters(a.lat, a.lng, viewLat, viewLng)/1000; if(d > 20) suspicious = true; }
+    a.coordSuspicious = suspicious;
   });
 
   // 이상치로 걸러진 것만(전체가 아님 — 카카오 API 절약) 주소로 좌표를 다시 찾아 자동 보정 시도.
@@ -1552,7 +1602,10 @@ function flagAedCoordOutliers(items){
         a.origLat = a.lat; a.origLng = a.lng; // 원본 좌표는 참고용으로 남겨둠
         a.lat = fixed.lat; a.lng = fixed.lng;
         a.coordAutoFixed = true;
-        if(aedState.markers.length) renderAllMarkers(); // 이미 그려진 상태면 보정된 위치로 다시 그림
+        // ⚠️ 예전엔 여기서 renderAllMarkers()(인명구조함 3,647개 전체 재렌더링)를 잘못 호출하고
+        // 있었음 — AED 좌표 보정이랑 인명구조함은 전혀 무관한데 매번 무거운 전체 재구성이
+        // 일어나서 낭비였음. AED 전용 클러스터러만 갱신하도록 수정함(훨씬 가벼움).
+        if(aedClusterer){ clearAedMarkers(); prepareOverlapCheckCache(); items.forEach(item=>renderAedMarker(item)); }
       }
     });
   });
@@ -1679,10 +1732,13 @@ function renderAedMarker(a){
   const status = isAedAvailableNow(a);
   const icon = (status.available === false) ? AED_ICON_GRAY() : AED_ICON();
   const marker = new kakao.maps.Marker({
-    position: new kakao.maps.LatLng(pos.lat, pos.lng), map, image: icon, zIndex: 15
+    position: new kakao.maps.LatLng(pos.lat, pos.lng), image: icon, zIndex: 15
+    // ⚠️ map을 여기서 직접 지정하지 않음 — 클러스터러가 addMarker로 관리해야 축소 시
+    // 숫자 뱃지로 묶여서 표시됨(예전엔 여기서 map을 바로 지정해서 클러스터링이 전혀 안 됐음)
   });
   kakao.maps.event.addListener(marker, 'click', ()=>showAedInfo(a));
   aedState.markers.push(marker);
+  if(aedClusterer) aedClusterer.addMarker(marker); else marker.setMap(map); // 클러스터러 준비 전 안전장치
 }
 
 // 구조함(또는 다른 AED)과 5m 이내로 겹치면 살짝 옆으로 밀어서 둘 다 보이고 둘 다 클릭되게 함
@@ -1690,10 +1746,12 @@ function renderAedMarker(a){
 function avoidOverlapPosition(lat, lng){
   const OVERLAP_THRESHOLD_M = 5;
   const OFFSET_M = 8;
-  // 3,647건 전부와 매번 삼각함수(haversine) 계산하면 느려지므로, 명백히 먼 것들은
-  // 값싼 위경도 차이 비교로 먼저 걸러내고(약 20m 범위), 그 안에 든 것만 정밀 계산
   const BOX_DEG = 0.0002;
-  const existing = loadRecords();
+  // ⚠️ 예전엔 AED 마커 하나 그릴 때마다 인명구조함 전체(3,647건)를 매번 처음부터 다시 훑었음.
+  // AED가 여러 개면(예: 지역에 100개) 100×3,647번 반복되는 구조라 화면 이동 직후 렌더링이
+  // 순간적으로 무거워지는 원인이 될 수 있었음. 지금 화면 범위 근처에 있는 것만 미리 한 번
+  // 추려두고(_overlapCheckCache), AED 여러 개를 그리는 동안 계속 재사용하도록 최적화함.
+  const existing = _overlapCheckCache || loadRecords();
   let tooClose = existing.some(r =>
         Math.abs(r.lat-lat) < BOX_DEG && Math.abs(r.lng-lng) < BOX_DEG &&
         haversineMeters(lat, lng, r.lat, r.lng) < OVERLAP_THRESHOLD_M
@@ -1706,6 +1764,22 @@ function avoidOverlapPosition(lat, lng){
   const dLat = (OFFSET_M/111000);
   const dLng = (OFFSET_M/(111000*Math.cos(lat*Math.PI/180)));
   return { lat: lat + dLat, lng: lng + dLng };
+}
+
+// AED를 여러 개 한꺼번에 그리기 직전에 한 번만 호출 — 지금 화면 범위(+여유분) 안에 있는
+// 인명구조함만 추려서 재사용 가능한 캐시로 만들어둠. 화면 밖 인명구조함은 애초에 AED 마커와
+// 겹칠 수가 없으므로 검사 대상에서 제외해도 결과는 동일하면서 훨씬 빠름.
+let _overlapCheckCache = null;
+function prepareOverlapCheckCache(){
+  try{
+    const b = map.getBounds();
+    const sw = b.getSouthWest(), ne = b.getNorthEast();
+    const pad = 0.01; // 화면 경계 바로 바깥의 겹침까지 놓치지 않게 살짝 여유를 둠
+    _overlapCheckCache = loadRecords().filter(r =>
+      r.lat >= sw.getLat()-pad && r.lat <= ne.getLat()+pad &&
+      r.lng >= sw.getLng()-pad && r.lng <= ne.getLng()+pad
+    );
+  }catch(e){ _overlapCheckCache = null; } // 실패하면 안전하게 예전 방식(전체 검사)으로 자동 대체
 }
 
 function showAedInfo(a){
