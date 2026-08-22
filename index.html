@@ -99,6 +99,13 @@
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
   }
+  #skyviewEntry{
+    position:fixed;right:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
+    width:40px;height:40px;border-radius:50%;background:#fff;color:var(--navy);
+    border:2px solid var(--line);box-shadow:0 3px 12px rgba(0,0,0,.18);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:18px;
+  }
+  #skyviewEntry.on{ background:var(--navy); border-color:#fff; }
   #nearestEntry{
     position:fixed;left:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
     height:clamp(30px,8.5vw,46px);padding:0 clamp(8px,2.4vw,18px);border-radius:20px;background:var(--orange);color:#fff;
@@ -378,6 +385,8 @@
 <button id="myLocationEntry" onclick="goToMyLocation()" title="내 위치로 가기">
   <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="3" fill="#fff"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="12" r="7" fill="none" stroke="#fff" stroke-width="2"/></svg>
 </button>
+
+<button id="skyviewEntry" onclick="toggleSkyview()" title="항공뷰(위성사진) 전환">🛰️</button>
 
 <button id="nearestEntry" onclick="openNearestSheet()" title="가까운곳 찾기">가까운곳 찾기</button>
 
@@ -1009,11 +1018,15 @@ async function initMap(){
     gridSize: 120, // ⚠️ 예전엔 70이라 해안선 따라 붙어있어도 격자 칸이 갈려서 묶이지 않는 경우가 많았음
     disableClickZoom: false,
     calculator: [10, 50, 100],
+    // ⚠️ 색깔만으로 인명구조함 클러스터(원형)와 구별하면 색맹이거나 화면이 어두운 환경에서
+    // 헷갈릴 수 있어서, 모양 자체를 둥근 사각형으로 다르게 만들어 색과 무관하게 항상 구별되게 함.
+    // (45도로 회전시키는 것도 고려했으나, 그러면 안의 숫자까지 같이 비스듬해져서 읽기 어려워지므로
+    // 회전 없이 모서리 둥글기만 다르게 해서 텍스트는 항상 똑바로 보이게 함)
     styles: [
-      {width:'32px',height:'32px',background:'rgba(224,49,49,.88)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'32px',fontSize:'12px',fontWeight:'700',border:'2px solid #fff'},
-      {width:'40px',height:'40px',background:'rgba(198,40,40,.88)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'40px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff'},
-      {width:'48px',height:'48px',background:'rgba(165,29,29,.9)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'48px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff'},
-      {width:'58px',height:'58px',background:'rgba(122,18,18,.92)',borderRadius:'50%',color:'#fff',textAlign:'center',lineHeight:'58px',fontSize:'14px',fontWeight:'700',border:'2px solid #fff'}
+      {width:'32px',height:'32px',background:'rgba(224,49,49,.9)',color:'#fff',textAlign:'center',lineHeight:'32px',fontSize:'12px',fontWeight:'700',border:'2px solid #fff',borderRadius:'8px'},
+      {width:'40px',height:'40px',background:'rgba(198,40,40,.9)',color:'#fff',textAlign:'center',lineHeight:'40px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff',borderRadius:'9px'},
+      {width:'48px',height:'48px',background:'rgba(165,29,29,.92)',color:'#fff',textAlign:'center',lineHeight:'48px',fontSize:'13px',fontWeight:'700',border:'2px solid #fff',borderRadius:'10px'},
+      {width:'58px',height:'58px',background:'rgba(122,18,18,.94)',color:'#fff',textAlign:'center',lineHeight:'58px',fontSize:'14px',fontWeight:'700',border:'2px solid #fff',borderRadius:'12px'}
     ]
   });
 
@@ -1159,6 +1172,14 @@ function renderNearestResult(r){
       <button class="btn btn-primary btn-sm" onclick="openAedDirections(${r.lat},${r.lng},'${r.name.replace(/'/g,'')}')">🚗 여기로 길찾기</button>
     </div>
   `;
+}
+
+let skyviewOn = false;
+function toggleSkyview(){
+  skyviewOn = !skyviewOn;
+  // HYBRID = 항공사진 위에 도로명·라벨을 겹쳐서 보여줌(순수 항공사진만 보려면 SKYVIEW로 바꾸면 됨)
+  map.setMapTypeId(skyviewOn ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP);
+  document.getElementById('skyviewEntry').classList.toggle('on', skyviewOn);
 }
 
 function goToMyLocation(){
@@ -1792,13 +1813,20 @@ function showAedInfo(a){
   const fixedNote = a.coordAutoFixed
     ? `<div style="color:var(--orange);font-size:12px;margin-bottom:6px;">📍 원본 데이터의 좌표 오류가 의심되어, 등록된 주소 기준으로 위치를 자동 보정해서 표시했습니다.</div>`
     : '';
+  // 관리자 연락처가 있으면 전화 걸기 버튼도 같이 보여줌(관리기관에 이용 가능 여부 등을 바로 확인할 수 있게)
+  const callBtn = a.tel
+    ? `<button class="btn btn-sm" style="background:#fff;border:1px solid var(--danger);color:var(--danger);margin-left:6px;" onclick="location.href='tel:${a.tel}'">📞 관리자 전화(${a.tel})</button>`
+    : '';
   box.innerHTML = `
     <button id="aedInfoClose" onclick="closeAedInfo()">✕</button>
     <div style="font-weight:700;margin-bottom:4px;padding-right:20px;">🚑 ${a.name}</div>
     <div style="color:var(--ink-soft);margin-bottom:6px;">${a.address}${a.place ? ' · '+a.place : ''}</div>
     ${fixedNote}
     <div style="color:${badgeColor};font-weight:700;margin-bottom:10px;">${status.label}</div>
-    <button class="btn btn-primary btn-sm" onclick="openAedDirections(${a.lat},${a.lng},'${(a.name||'AED').replace(/'/g,"")}')">🚗 이 AED로 길찾기</button>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      <button class="btn btn-primary btn-sm" onclick="openAedDirections(${a.lat},${a.lng},'${(a.name||'AED').replace(/'/g,"")}')">🚗 이 AED로 길찾기</button>
+      ${callBtn}
+    </div>
   `;
   box.classList.add('show');
 }
