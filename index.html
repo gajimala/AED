@@ -1558,7 +1558,17 @@ function readAedCache(sido, sigungu){
       // 검사하면(카카오 API 재호출) 캐시를 쓰는 의미가 없어지므로, 아직 한 번도 검사 안 된
       // 항목(이전 버전에서 저장된 캐시 등 예외 상황 대비)만 골라서 검사함.
       const unchecked = cached.items.filter(a => a.coordSuspicious === undefined);
-      if(unchecked.length) flagAedCoordOutliers(unchecked);
+      if(unchecked.length){
+        // ⚠️ 진짜 버그였던 부분: 여기서 검사한 결과가 지금까지 다시 캐시(localStorage)에
+        // 저장이 안 되고 있었음. 그래서 지도를 조금만 움직여도(idle 이벤트마다) 매번
+        // "아직 확인 안 됨"으로 취급돼서 계속 재검사 → 계속 API 재호출 + 결과 나올 때마다
+        // 화면 다시 그리기 반복 → 깜빡임의 직접적인 원인이었음. 검사가 끝나면 반드시
+        // 캐시에 다시 저장해서, 이 지역은 정말로 한 번만 검사되게 함.
+        flagAedCoordOutliers(unchecked).then(()=>{
+          try{ localStorage.setItem(AED_CACHE_PREFIX + sido + '_' + sigungu, JSON.stringify(cached)); }
+          catch(e){}
+        });
+      }
       return cached;
     }
   }catch(e){}
@@ -1627,10 +1637,14 @@ async function flagAedCoordOutliers(items){
 }
 
 // 좌표가 실제 육지(유효한 행정구역이 존재하는 지점)인지 확인. 바다·행정구역 밖이면 false.
+// ⚠️ 예전엔 coord2RegionCode(행정구역 경계)로 확인했는데, 해안가 시/군/구는 관할 경계 자체가
+// 어업 관할 등의 이유로 바다 쪽으로도 넓게 걸쳐있어서 "행정구역이 있다"는 결과가 나와도 실제로는
+// 바다일 수 있었음(이게 바다 위 AED가 계속 안 걸러지던 진짜 원인). 대신 coord2Address의 지번
+// 주소(land parcel) 존재 여부로 확인함 — 지번은 실제 땅에만 있고 바다에는 없으므로 훨씬 정확함.
 function isOnLand(lat, lng){
   return new Promise(resolve=>{
-    geocoder.coord2RegionCode(lng, lat, (result, status)=>{
-      resolve(status === kakao.maps.services.Status.OK && result.length > 0);
+    geocoder.coord2Address(lng, lat, (result, status)=>{
+      resolve(status === kakao.maps.services.Status.OK && result.length > 0 && !!result[0].address);
     });
   });
 }
