@@ -118,6 +118,10 @@
     border:2px solid #fff;border-radius:16px;padding:6px 12px;
     box-shadow:0 3px 10px rgba(0,0,0,.28);cursor:pointer;white-space:nowrap;
   }
+  .aed-summary-badge-big{
+    font-size:17px;padding:10px 18px;border-radius:22px;border-width:3px;
+    background:rgba(122,18,18,.94);box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
   .nearest-pulse{
     width:22px;height:22px;border-radius:50%;background:var(--orange);
     border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);
@@ -1584,19 +1588,31 @@ function renderAedInViewport(){
 // 지도 중심 위경도(+여유분) 안에 대표 좌표가 있는 시/군/구만 골라서, 개별 마커 대신
 // 숫자 뱃지(예: "342")로 표시함 — 개별 AED 위치 계산을 전혀 안 하므로 아무리 넓게 봐도 가벼움.
 let _aedSummaryMarkers = [];
+const AED_SIDO_SUMMARY_ZOOM_LEVEL = 11; // ⚠️ 이 값 이상으로 더 축소되면, 구 단위 요약보다 한 단계 더 뭉쳐서 시/도 단위로 보여줌(광역/전국 보기용)
+
 async function renderAedSummaryMode(){
   const summary = await loadAedSummary();
-  if(!aedState.on || map.getLevel() < AED_SUMMARY_ZOOM_LEVEL) return; // 로딩 대기 중 줌이 다시 바뀌었으면 무시
+  const level = map.getLevel();
+  if(!aedState.on || level < AED_SUMMARY_ZOOM_LEVEL) return; // 로딩 대기 중 줌이 다시 바뀌었으면 무시
 
-  let sigunguList = [];
-  Object.keys(summary).forEach(sido=>{
-    Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
-      const s = summary[sido].sigungu[sg];
-      sigunguList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng });
+  const showSido = level >= AED_SIDO_SUMMARY_ZOOM_LEVEL;
+  let badgeList = [];
+  if(showSido){
+    // 광역/전국 단위로 더 축소된 상태 — 시/도 단위 큰 숫자로 뭉쳐서 보여줌
+    Object.keys(summary).forEach(sido=>{
+      badgeList.push({ label: sido, count: summary[sido].count, lat: summary[sido].lat, lng: summary[sido].lng, big:true });
     });
-  });
+  } else {
+    // 구 단위 요약
+    Object.keys(summary).forEach(sido=>{
+      Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
+        const s = summary[sido].sigungu[sg];
+        badgeList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng, big:false });
+      });
+    });
+  }
 
-  const key = 'summary:' + sigunguList.length;
+  const key = 'summary:' + (showSido?'sido':'sigungu') + ':' + badgeList.length;
   if(key === _lastAedRenderedKey) return;
   _lastAedRenderedKey = key;
 
@@ -1606,12 +1622,16 @@ async function renderAedSummaryMode(){
   closeAedInfo();
   if(_aedCenterMarker){ _aedCenterMarker.setMap(null); _aedCenterMarker = null; } // 요약 모드에선 "내 중심 기준 반경" 개념이 없으므로 중심점 표시도 뺌
 
-  sigunguList.forEach(r=>{
+  badgeList.forEach(r=>{
     const el = document.createElement('div');
-    el.className = 'aed-summary-badge';
+    el.className = 'aed-summary-badge' + (r.big ? ' aed-summary-badge-big' : '');
     el.textContent = r.count.toLocaleString();
     el.title = `${r.label} · AED ${r.count.toLocaleString()}개 — 눌러서 확대`;
-    el.onclick = () => { map.setLevel(AED_SUMMARY_ZOOM_LEVEL-3); map.setCenter(new kakao.maps.LatLng(r.lat, r.lng)); }; // 눌러서 그 지역으로 확대(개별 마커 모드로 자연스럽게 전환됨)
+    el.onclick = () => {
+      // 시/도 뱃지를 누르면 구 단위 요약으로, 구 뱃지를 누르면 개별 마커 모드로 — 한 단계씩 자연스럽게 확대
+      map.setLevel(r.big ? AED_SUMMARY_ZOOM_LEVEL : AED_SUMMARY_ZOOM_LEVEL-3);
+      map.setCenter(new kakao.maps.LatLng(r.lat, r.lng));
+    };
     const overlay = new kakao.maps.CustomOverlay({
       position: new kakao.maps.LatLng(r.lat, r.lng), content: el, zIndex: 20, yAnchor: 0.5, xAnchor: 0.5
     });
