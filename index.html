@@ -827,7 +827,8 @@ function loadRecords(){ return _cache || []; }
 // 화면 반응은 즉시(낙관적 갱신), 실제 저장은 Worker를 거쳐 GitHub에 커밋됨.
 // 저장 실패 시(네트워크 문제, Worker 미배포 등) 사용자에게 바로 알림.
 async function upsertRecord(rec){
-  const list = loadRecords();
+  const before = loadRecords(); // ⚠️ 실패 시 되돌리기 위해 저장 전 상태를 기억해둠
+  const list = [...before];
   const i = list.findIndex(r=>r.id===rec.id);
   const isNew = i === -1;
   rec.updatedAt = Date.now();
@@ -844,20 +845,23 @@ async function upsertRecord(rec){
     showSyncDone();
   }catch(e){
     console.error('서버 저장 실패', e);
-    alert('서버 저장에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면에는 반영됐지만 새로고침하면 사라질 수 있습니다.');
+    _cache = before; // ⚠️ 서버 저장이 실제로는 실패했으므로, 화면 데이터도 저장 전 상태로 되돌림(화면·서버 불일치 방지)
+    alert('서버 저장에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면 표시를 원래대로 되돌렸습니다.');
     throw e; // await하는 쪽(예: revertChange)이 실패를 알 수 있게 전달
   }
   return list;
 }
 async function deleteRecord(id){
-  _cache = loadRecords().filter(r=>r.id!==id);
+  const before = loadRecords(); // ⚠️ 실패 시 되돌리기 위해 삭제 전 상태를 기억해둠
+  _cache = before.filter(r=>r.id!==id);
   try{
     const res = await fetch(`${WORKER_URL}/lifesavers/${id}`, { method:'DELETE', headers:{ 'X-Admin-Code': ADMIN_CODE } });
     if(!res.ok) throw new Error('HTTP '+res.status);
     showSyncDone();
   }catch(e){
     console.error('서버 삭제 실패', e);
-    alert('서버 삭제에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요).');
+    _cache = before; // ⚠️ 서버 삭제가 실제로는 실패했으므로, 화면도 삭제 전 상태로 되돌림(화면·서버 불일치 방지)
+    alert('서버 삭제에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면 표시를 원래대로 되돌렸습니다.');
     throw e; // await하는 쪽이 실패를 알 수 있게 전달
   }
 }
@@ -1845,8 +1849,9 @@ function buildMarker(rec){
 }
 
 function addMarkerToMap(rec){
-  const marker = buildMarker(rec);
+  const marker = buildMarker(rec); // buildMarker가 markerObjs[rec.id]도 이미 등록해줌
   clusterer.addMarker(marker);   // 개별 추가(신규입력 등)는 addMarker
+  return { marker, id: rec.id }; // 실패 시 다시 지도에서 제거할 수 있도록 참조를 돌려줌
 }
 
 /* =========================================================
@@ -2229,15 +2234,22 @@ async function applyApprovedChange(entry, isCivilianAuto){
     if(isCivilianAuto){
       _cache = loadRecords().concat([rec]);
     } else {
-      upsertRecord(rec);
+      await upsertRecord(rec); // ⚠️ 실패하면 여기서 throw돼서 approveRequest의 catch가 잡을 수 있게 함
     }
     addMarkerToMap(rec);
     if(!isCivilianAuto) entry.targetId = rec.id; // 이후 이력에서 어떤 레코드가 생성됐는지 추적 가능하게
   } else if(entry.type==='delete'){
     const target = markerObjs[entry.targetId];
-    if(target){ clusterer.removeMarker(target.marker); delete markerObjs[entry.targetId]; }
-    if(isCivilianAuto) _cache = loadRecords().filter(r=>r.id!==entry.targetId);
-    else deleteRecord(entry.targetId);
+    if(isCivilianAuto){
+      if(target){ clusterer.removeMarker(target.marker); delete markerObjs[entry.targetId]; }
+      _cache = loadRecords().filter(r=>r.id!==entry.targetId);
+    } else {
+      // ⚠️ 예전엔 서버 삭제를 확인하기도 전에 지도 마커부터 먼저 지웠음 — 삭제가 실패하면
+      // "서버엔 남아있는데 화면에서만 사라진" 상태가 될 수 있었음. 이제 서버 삭제가 실제로
+      // 성공한 걸 확인한 뒤에만 마커를 지도에서 제거함(실패하면 catch로 던져져 화면 그대로 유지).
+      await deleteRecord(entry.targetId);
+      if(target){ clusterer.removeMarker(target.marker); delete markerObjs[entry.targetId]; }
+    }
   } else { // edit
     const target = markerObjs[entry.targetId];
     if(target){
@@ -2248,7 +2260,7 @@ async function applyApprovedChange(entry, isCivilianAuto){
         if(i>-1) list[i] = rec;
         _cache = list;
       } else {
-        upsertRecord(rec);
+        await upsertRecord(rec);
       }
       target.record = rec;
       target.marker.setPosition(new kakao.maps.LatLng(entry.newLat, entry.newLng));
@@ -2840,16 +2852,22 @@ function toggleMoveMode(){
   m.className='msg ok'; m.style.display = moveModeId===id ? 'block':'none';
 }
 
-function deleteMarker(){
+async function deleteMarker(){
   if(!isAdmin) return;
   if(!confirm('이 구조함을 삭제할까요? 되돌릴 수 없습니다.')) return;
   const id = currentMarkerId;
   const rec = markerObjs[id].record;
-  clusterer.removeMarker(markerObjs[id].marker);
-  deleteRecord(id);
+  const marker = markerObjs[id].marker;
+  clusterer.removeMarker(marker); // 지도에는 먼저 지움(반응성)
+  closeMarkerSheet();
+  try{
+    await deleteRecord(id); // ⚠️ 서버 삭제가 실제로 끝나길 기다림 — 실패하면 아래 catch에서 마커를 다시 살림
+  }catch(e){
+    clusterer.addMarker(marker); // 서버 삭제가 실패했으므로 지도에도 다시 표시해서 화면·서버 상태를 맞춤
+    return;
+  }
   logAdminChange('delete', id, rec.addr, rec.lat, rec.lng, null, null, '관리자 직접 삭제');
   delete markerObjs[id];
-  closeMarkerSheet();
 }
 
 /* =========================================================
@@ -3299,11 +3317,20 @@ function doRenderHistoryList(){
 }
 
 
-function approveRequest(id){
+async function approveRequest(id){
   const req = loadRequests().find(r=>r.id===id);
   if(!req) return;
-  applyApprovedChange(req); // 실제 반영(lifesavers.json)은 여기서 처리 — Worker의 /reports는 상태만 기록
-  resolveRequestEntry(id, 'approved', req.targetId);
+  const btn = document.querySelector(`button[onclick="approveRequest('${id}')"]`);
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 처리 중…'; }
+  try{
+    await applyApprovedChange(req); // ⚠️ 실제 저장이 끝나길 기다려서, 저장 성공했을 때만 "승인"으로 기록되게 함
+    resolveRequestEntry(id, 'approved', req.targetId);
+  }catch(e){
+    console.error('제보 승인 처리 실패', e);
+    alert('저장에 실패해서 승인 처리를 하지 못했습니다. 잠시 후 다시 시도해주세요.');
+    if(btn){ btn.disabled = false; btn.textContent = '✅ 승인'; }
+    return; // 승인 기록을 남기지 않고 그대로 대기 상태 유지
+  }
   renderRequestsList();
   buildBulkEditTable();
 }
@@ -3367,7 +3394,7 @@ async function revertChange(id){
 }
 
 /* ---------------- 신규입력 ---------------- */
-function addSingle(){
+async function addSingle(){
   const lat = parseFloat(document.getElementById('newLat').value);
   const lng = parseFloat(document.getElementById('newLng').value);
   const addr = document.getElementById('newAddr').value.trim();
@@ -3377,9 +3404,17 @@ function addSingle(){
     msg.textContent='위도/경도를 정확히 입력하세요.'; msg.className='msg err'; msg.style.display='block'; return;
   }
   const rec = {id:newId(), lat, lng, addr, note, lastEditSource:'admin'};
-  upsertRecord(rec);
+  addMarkerToMap(rec); // 지도에는 먼저 보여줌(반응성) — 아래에서 저장 결과에 따라 문구만 다르게 함
+  msg.textContent='저장 중…'; msg.className='msg'; msg.style.display='block';
+  try{
+    await upsertRecord(rec); // ⚠️ 저장이 실제로 끝나길 기다렸다가, 성공했을 때만 "등록되었습니다"와 입력칸 비우기를 함
+  }catch(e){
+    // upsertRecord 자체가 실패 알림(alert)을 이미 띄우므로 여기선 문구만 정리하고, 입력값은
+    // 그대로 남겨서 사용자가 다시 시도할 수 있게 함(입력 내용을 잃지 않게).
+    msg.textContent='저장에 실패했습니다. 위 알림을 확인하고 다시 시도해주세요.'; msg.className='msg err'; msg.style.display='block';
+    return;
+  }
   logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력');
-  addMarkerToMap(rec);
   classifyMissingRegions();
   msg.textContent='등록되었습니다. 지도에 즉시 반영됩니다.'; msg.className='msg ok'; msg.style.display='block';
   document.getElementById('newLat').value='';
@@ -3420,11 +3455,29 @@ function parseBulkNew(){
     <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">${parsed.length}건 등록 예정</div>
     <button class="btn btn-orange" style="margin-top:8px;" id="confirmBulkBtn">전체 등록하기</button>
   `;
-  document.getElementById('confirmBulkBtn').onclick = ()=>{
-    parsed.forEach(rec=>{ rec.lastEditSource='admin'; upsertRecord(rec); addMarkerToMap(rec); });
+  document.getElementById('confirmBulkBtn').onclick = async ()=>{
+    const markerRefs = parsed.map(rec => { rec.lastEditSource='admin'; return addMarkerToMap(rec); }); // 지도에는 먼저 다 보여줌(반응성)
+    msg.textContent = `${parsed.length}건 저장 중…`; msg.className='msg';
+    // ⚠️ 예전엔 저장 결과를 기다리지 않고 바로 "등록 완료"라고 표시했음 — 대량입력은 특히
+    // 여러 건 중 일부만 실패할 수 있어서, 전부 끝날 때까지 기다린 뒤 정확한 성공/실패 건수를
+    // 알려주는 게 중요함. allSettled를 써서 일부가 실패해도 나머지 결과를 놓치지 않게 함.
+    const results = await Promise.allSettled(parsed.map(rec => upsertRecord(rec)));
+    let failCount = 0;
+    results.forEach((r, idx)=>{
+      if(r.status==='rejected'){
+        failCount++;
+        const ref = markerRefs[idx];
+        if(ref && ref.marker) clusterer.removeMarker(ref.marker); // 실패한 것만 정확히 골라 지도에서도 지움
+        if(ref && ref.id) delete markerObjs[ref.id];
+      }
+    });
     classifyMissingRegions();
     if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(붙여넣기) — ${parsed.length}건 등록`);
-    msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
+    if(failCount===0){
+      msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
+    } else {
+      msg.textContent = `${parsed.length}건 중 ${failCount}건 저장 실패로 지도에서 제외했습니다. 나머지 ${parsed.length-failCount}건은 정상 등록되었습니다.`; msg.className='msg err';
+    }
     document.getElementById('bulkNewArea').value='';
     preview.innerHTML='';
     buildBulkEditTable();
@@ -3502,11 +3555,28 @@ function parseBulkNewExcel(evt){
     msg.textContent = `${parsed.length}건 인식됨${errCount? `, ${errCount}행은 좌표 오류로 제외`:''}`;
     msg.className='msg ok'; msg.style.display='block';
     preview.innerHTML = `<button class="btn btn-orange" style="margin-top:10px;" id="confirmExcelBtn">${parsed.length}건 전체 등록하기</button>`;
-    document.getElementById('confirmExcelBtn').onclick = ()=>{
-      parsed.forEach(rec=>{ rec.lastEditSource='admin'; upsertRecord(rec); addMarkerToMap(rec); });
+    document.getElementById('confirmExcelBtn').onclick = async ()=>{
+      const markerRefs = parsed.map(rec => { rec.lastEditSource='admin'; return addMarkerToMap(rec); }); // 지도에는 먼저 다 보여줌(반응성)
+      msg.textContent = `${parsed.length}건 저장 중…`; msg.className='msg';
+      const results = await Promise.allSettled(parsed.map(rec => upsertRecord(rec)));
+      // ⚠️ 예전엔 실패 건수만 문구로 알려주고, 실패한 마커는 지도에 그대로 남아있었음 — 메시지랑
+      // 실제 화면이 서로 다른 얘기를 하는 상태였음. 실패한 것만 정확히 골라 지도에서도 지움.
+      let failCount = 0;
+      results.forEach((r, idx)=>{
+        if(r.status==='rejected'){
+          failCount++;
+          const ref = markerRefs[idx];
+          if(ref && ref.marker) clusterer.removeMarker(ref.marker);
+          if(ref && ref.id) delete markerObjs[ref.id];
+        }
+      });
       classifyMissingRegions();
       if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(엑셀) — ${parsed.length}건 등록`);
-      msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`;
+      if(failCount===0){
+        msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
+      } else {
+        msg.textContent = `${parsed.length}건 중 ${failCount}건 저장 실패로 지도에서 제외했습니다. 나머지 ${parsed.length-failCount}건은 정상 등록되었습니다.`; msg.className='msg err';
+      }
       preview.innerHTML=''; evt.target.value='';
       buildBulkEditTable();
     };
