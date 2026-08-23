@@ -1058,7 +1058,7 @@ async function initMap(){
   loadAedNationwide();
 
   // AED를 켜둔 상태에서 지도를 움직이거나 확대/축소하면, 멈췄을 때(idle) 그 위치 기준으로 다시 조회
-  kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) renderAedInViewport(); });
+  kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) loadAedNationwide(); });
 }
 
 // 우측 상단 버튼으로 언제든 다시 내 위치로 이동(한 번만, 강제 추적 아님)
@@ -1384,7 +1384,7 @@ function populateRegionSelect(){
 function onRegionChange(){
   currentRegionFilter = document.getElementById('regionSelect').value;
   renderAllMarkers();
-  if(aedState.on) renderAedInViewport();
+  if(aedState.on) loadAedNationwide();
 }
 
 /* =========================================================
@@ -1403,12 +1403,27 @@ let _lastAedRenderedKey = null; // 지금 화면에 떠 있는 AED 목록의 서
 // AED 실시간 조회를 매번 반복했음. 이제는 Cloudflare Worker가 15분마다 미리 전국 AED를
 // 받아서 시/도별 정적 파일(aed/서울특별시.json 등)로 GitHub에 저장해두므로, 클라이언트는
 // 그 파일들만 불러오면 됨 — 카카오 API도, 실시간 정부 API 호출도 전혀 필요 없어짐.
+// 각 시/도의 대략적인 위경도 범위(경계 상자) — 화면에 실제로 걸치는 시/도만 골라서 불러오기 위함.
+// 정확한 행정경계일 필요는 없음(살짝 넉넉하게만 잡으면 됨) — 정밀한 판정은 어차피 마커 단위로
+// 한 번 더 걸러지므로, 여기서는 "이 시/도를 아예 안 받아도 되는지"만 빠르게 판단하는 용도.
+const AED_SIDO_BOUNDS = {
+  '서울특별시':[37.41,37.70,126.76,127.19], '부산광역시':[34.87,35.40,128.75,129.32],
+  '대구광역시':[35.68,36.00,128.35,128.75], '인천광역시':[37.20,37.85,126.05,126.85],
+  '광주광역시':[35.05,35.28,126.65,127.00], '대전광역시':[36.20,36.48,127.24,127.55],
+  '울산광역시':[35.35,35.72,128.95,129.52], '세종특별자치시':[36.43,36.70,127.15,127.42],
+  '경기도':[36.89,38.30,126.30,127.90], '강원특별자치도':[37.02,38.62,127.05,129.40],
+  '충청북도':[36.00,37.25,127.30,128.40], '충청남도':[35.98,37.05,126.10,127.55],
+  '전북특별자치도':[35.35,36.20,126.30,127.90], '전라북도':[35.35,36.20,126.30,127.90],
+  '전라남도':[33.90,35.55,125.75,127.75], '경상북도':[35.60,37.05,127.90,129.60],
+  '경상남도':[34.70,35.90,127.55,129.30], '제주특별자치도':[33.10,33.65,126.10,126.98],
+};
+
 const AED_SIDO_LIST = [
   '서울특별시','부산광역시','대구광역시','인천광역시','광주광역시','대전광역시','울산광역시',
   '세종특별자치시','경기도','강원특별자치도','충청북도','충청남도','전북특별자치도','전라북도',
   '전라남도','경상북도','경상남도','제주특별자치도'
 ];
-let _aedNationwideLoaded = false;
+let _aedLoadedSido = new Set(); // 지금까지 실제로 내려받은 시/도만 기록(중복 다운로드 방지)
 
 function toggleAedLayer(){
   aedState.on = !aedState.on;
@@ -1436,34 +1451,69 @@ function clearAedMarkers(){
 
 // 시/도별 정적 파일을 전부 불러와 하나로 합침(한 번 불러오면 메모리에 유지 — 재조회 없음).
 // 개별 파일 하나가 없거나(아직 그 시/도 첫 갱신 전) 실패해도 나머지는 정상적으로 계속 진행함.
+// ⚠️ 예전엔 AED를 켜자마자 17~18개 시/도 파일을 전부 무조건 다 받아버렸음(전국 지도를 볼 때만
+// 필요한 양인데 도심 확대 상태에서도 매번 똑같이 다 받음) — 이게 실제 버벅임의 핵심 원인이었음.
+// 이제는 지금 화면(+여유분)에 걸치는 시/도만 필요한 만큼 불러오고, 지도를 움직여 새 지역이
+// 보이면 그때 그 지역 파일만 추가로 불러옴(이미 받은 시/도는 다시 안 받음).
 async function loadAedNationwide(){
-  if(_aedNationwideLoaded){ renderAedInViewport(); return; } // 이미 다 받아놨으면 화면에 표시만 다시 함(재요청 없음)
-  setAedInfoMsg('AED 정보를 불러오는 중…');
-  const results = await Promise.allSettled(
-    AED_SIDO_LIST.map(sido => fetch(`./aed/${encodeURIComponent(sido)}.json`).then(r => r.ok ? r.json() : []))
-  );
-  let all = [];
-  results.forEach(r => { if(r.status==='fulfilled' && Array.isArray(r.value)) all = all.concat(r.value); });
-  aedState.allItems = all;
-  _aedNationwideLoaded = true;
-  document.getElementById('aedInfoBox').classList.remove('show');
+  const relevant = getRelevantSidoForViewport();
+  const toFetch = relevant.filter(s => !_aedLoadedSido.has(s));
+  if(toFetch.length){
+    setAedInfoMsg('AED 정보를 불러오는 중…');
+    const results = await Promise.allSettled(
+      toFetch.map(sido => fetch(`./aed/${encodeURIComponent(sido)}.json`).then(r => r.ok ? r.json() : []))
+    );
+    results.forEach((r, i) => {
+      _aedLoadedSido.add(toFetch[i]);
+      if(r.status==='fulfilled' && Array.isArray(r.value)){
+        // ⚠️ 저장된 파일은 용량을 줄이려고 배열 형식([경도,위도,이름,주소,장소,전화,id,시간압축])인데,
+        // 여기서 바로 예전부터 쓰던 이름표 붙은 형태로 변환해두면 나머지 코드(마커 렌더링, 정보창,
+        // 운영시간 판별 등)는 전혀 손댈 필요 없이 그대로 동작함.
+        const converted = r.value.map(arr => ({
+          lng: arr[0], lat: arr[1], name: arr[2], address: arr[3], place: arr[4], tel: arr[5], id: arr[6], hoursCompact: arr[7]
+        }));
+        aedState.allItems = aedState.allItems.concat(converted);
+      }
+    });
+    document.getElementById('aedInfoBox').classList.remove('show');
+  }
   renderAedInViewport();
 }
 
-// 지금 화면 범위(+여유분) 안에 있는 AED만 걸러서 마커로 그림 — 이미 전부 메모리에 있으므로
-// API 호출 없이 순수 필터링만 함. 클러스터러가 시각적으로는 알아서 묶어서 보여주므로,
-// 한반도 전체를 봐도(넓게 필터링돼도) 화면에 그려지는 부담은 크지 않음.
+// 지금 지도 화면(+여유분)과 경계가 겹치는 시/도만 골라냄 — 정밀할 필요 없이 "이 시/도를 아예
+// 안 봐도 되는지"만 빠르게 판단(순수 계산, API 호출 없음).
+function getRelevantSidoForViewport(){
+  try{
+    const c = map.getCenter();
+    const cLat = c.getLat(), cLng = c.getLng();
+    // ⚠️ 반경(km)을 위경도 여유분으로 대략 환산(정밀할 필요 없음 — 어느 시/도 파일을
+    // 받을지만 결정하는 용도, 실제 표시 여부는 renderAedInViewport의 정확한 haversine 계산이 함)
+    const padDeg = (AED_DISPLAY_RADIUS_KM / 111) * 1.5; // 여유 있게 1.5배
+    return AED_SIDO_LIST.filter(sido => {
+      const bd = AED_SIDO_BOUNDS[sido];
+      if(!bd) return true; // 경계 정보가 없는 이름이면 안전하게 포함(누락 방지)
+      const [latMin, latMax, lngMin, lngMax] = bd;
+      return latMin <= cLat+padDeg && latMax >= cLat-padDeg && lngMin <= cLng+padDeg && lngMax >= cLng-padDeg;
+    });
+  }catch(e){ return AED_SIDO_LIST; } // 실패하면 안전하게 예전 방식(전체)으로 대체
+}
+
+// 지도 중심에서 고정 반경(AED_DISPLAY_RADIUS_KM) 안에 있는 AED만 걸러서 마커로 그림 — 이미
+// 전부 메모리에 있으므로 API 호출 없이 순수 필터링만 함. 줌 레벨과 무관하게 항상 같은 반경만
+// 계산하므로, 아무리 축소해도 부담이 늘어나지 않음(보건복지부 앱과 동일한 방식).
+const AED_DISPLAY_RADIUS_KM = 10; // 보건복지부 응급의료정보제공 앱과 같은 방식 — 축척(줌)과 무관하게 항상 이 반경만 표시
+
 function renderAedInViewport(){
   if(!aedState.on || !map) return;
   let items = aedState.allItems;
   try{
-    const b = map.getBounds();
-    const sw = b.getSouthWest(), ne = b.getNorthEast();
-    const pad = (ne.getLat()-sw.getLat()) * 0.3; // 화면 경계 바로 바깥도 놓치지 않게 여유를 둠
-    items = aedState.allItems.filter(a =>
-      a.lat >= sw.getLat()-pad && a.lat <= ne.getLat()+pad &&
-      a.lng >= sw.getLng()-pad && a.lng <= ne.getLng()+pad
-    );
+    const c = map.getCenter();
+    const cLat = c.getLat(), cLng = c.getLng();
+    // ⚠️ 화면 범위(줌 레벨에 따라 계속 커지는) 대신, 지도 중심에서 고정된 반경만 봄 —
+    // 이러면 아무리 축소해도(전국 단위로 봐도) 항상 이 반경만큼만 계산하면 되므로,
+    // 줌 레벨과 완전히 무관하게 항상 가벼움(보건복지부 앱과 동일한 방식).
+    items = aedState.allItems.filter(a => haversineMeters(cLat, cLng, a.lat, a.lng) <= AED_DISPLAY_RADIUS_KM*1000);
+    renderAedCenterMarker(cLat, cLng);
   }catch(e){}
 
   const key = items.length + ':' + (items[0]?.id||'') + ':' + (items[items.length-1]?.id||'');
@@ -1474,6 +1524,19 @@ function renderAedInViewport(){
   closeAedInfo();
   prepareOverlapCheckCache();
   items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item));
+}
+
+// 지도 중심(=지금 AED를 찾는 기준점)에 표시를 남겨서, "왜 여기서 조금만 벗어나면 안 보이지?"
+// 하는 혼란을 줄임 — 보건복지부 앱도 중심 표시를 같이 보여줌.
+let _aedCenterMarker = null;
+function renderAedCenterMarker(lat, lng){
+  if(_aedCenterMarker) _aedCenterMarker.setMap(null);
+  _aedCenterMarker = new kakao.maps.CustomOverlay({
+    position: new kakao.maps.LatLng(lat, lng),
+    content: `<div style="width:14px;height:14px;border-radius:50%;background:var(--teal);border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);"></div>`,
+    zIndex: 5, yAnchor: 0.5, xAnchor: 0.5
+  });
+  _aedCenterMarker.setMap(map);
 }
 
 
@@ -1535,12 +1598,16 @@ function isKrHolidayToday(){
 function isAedAvailableNow(a){
   const now = new Date();
   const day = now.getDay(); // 0=일 1=월 ... 6=토
+  // ⚠️ hoursCompact 형식: "월시작-월끝,화시작-화끝,...,일시작-일끝,공휴일시작-공휴일끝" (8개, 쉼표구분)
+  // 순서는 월~일 + 공휴일. 휴무인 요일은 빈 문자열.
+  const parts = (a.hoursCompact || '').split(',');
+  const parseSlot = s => { const m = s && s.split('-'); return (m && m.length===2) ? [m[0], m[1]] : [null, null]; };
   const byDay = [
-    [a.sunStart, a.sunEnd], [a.monStart, a.monEnd], [a.tueStart, a.tueEnd],
-    [a.wedStart, a.wedEnd], [a.thuStart, a.thuEnd], [a.friStart, a.friEnd], [a.satStart, a.satEnd]
+    parseSlot(parts[6]), parseSlot(parts[0]), parseSlot(parts[1]), // 일,월,화 (byDay[day] 인덱스가 0=일요일 기준이라 순서 맞춤)
+    parseSlot(parts[2]), parseSlot(parts[3]), parseSlot(parts[4]), parseSlot(parts[5]) // 수,목,금,토
   ];
-  // 오늘이 공휴일(대체공휴일 포함)이면 요일별 시간 대신 holStart/holEnd(공휴일 운영시간)를 사용함.
-  const [startStr, endStr] = isKrHolidayToday() ? [a.holStart, a.holEnd] : byDay[day];
+  // 오늘이 공휴일(대체공휴일 포함)이면 요일별 시간 대신 공휴일 운영시간(8번째 항목)을 사용함.
+  const [startStr, endStr] = isKrHolidayToday() ? parseSlot(parts[7]) : byDay[day];
   if(!startStr || !endStr){
     // 다른 요일엔 운영시간 정보가 있는데 오늘만 비어있으면 → "정보 없음"이 아니라
     // "오늘(이 요일)은 휴무"로 판단하는 게 더 정확함(주말 휴무 등). 모든 요일이 다
