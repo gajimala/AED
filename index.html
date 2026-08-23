@@ -1725,6 +1725,32 @@ function renderAedMarker(a){
 
 // 구조함(또는 다른 AED)과 5m 이내로 겹치면 살짝 옆으로 밀어서 둘 다 보이고 둘 다 클릭되게 함
 // (원래 좌표는 a.lat/a.lng에 그대로 남아있으므로 길찾기는 정확한 실제 위치로 안내됨)
+// AED끼리(같은 배치 안에서) 겹치는지 빠르게 확인하기 위한 격자 기반 조회용 자료구조.
+// ⚠️ 예전엔 "새로 그리는 AED 하나마다 지금까지 그린 AED 전부와 하나하나 비교"하는 구조였음
+// (aedState.markers.some(...)). AED 개수가 N개면 비교 횟수가 N²으로 늘어나서, 최근 페이지네이션
+// 버그를 고쳐 지역당 최대 100개→1,000개까지 불러오게 되면서 이 부분이 체감될 만큼 느려졌음.
+// 좌표를 촘촘한 격자(약 5m 단위)로 나눠서 격자칸별로 마커를 모아두면, 겹침 확인이 그 칸(및
+// 바로 옆 칸)에 있는 소수의 마커랑만 비교하면 되므로 개수가 늘어나도 거의 일정한 속도를 유지함.
+let _aedOverlapGrid = null;
+const AED_GRID_DEG = 0.00005; // 위경도 약 5m 단위 격자
+function gridKey(lat, lng){ return Math.round(lat/AED_GRID_DEG) + '_' + Math.round(lng/AED_GRID_DEG); }
+function resetAedOverlapGrid(){ _aedOverlapGrid = new Map(); }
+function addToAedOverlapGrid(lat, lng){
+  const k = gridKey(lat, lng);
+  if(!_aedOverlapGrid.has(k)) _aedOverlapGrid.set(k, []);
+  _aedOverlapGrid.get(k).push({lat, lng});
+}
+function isNearExistingAed(lat, lng, thresholdM){
+  const baseLatIdx = Math.round(lat/AED_GRID_DEG), baseLngIdx = Math.round(lng/AED_GRID_DEG);
+  for(let dLat=-1; dLat<=1; dLat++){
+    for(let dLng=-1; dLng<=1; dLng++){
+      const bucket = _aedOverlapGrid.get((baseLatIdx+dLat)+'_'+(baseLngIdx+dLng));
+      if(bucket && bucket.some(p => haversineMeters(lat,lng,p.lat,p.lng) < thresholdM)) return true;
+    }
+  }
+  return false;
+}
+
 function avoidOverlapPosition(lat, lng){
   const OVERLAP_THRESHOLD_M = 5;
   const OFFSET_M = 8;
@@ -1738,14 +1764,15 @@ function avoidOverlapPosition(lat, lng){
         Math.abs(r.lat-lat) < BOX_DEG && Math.abs(r.lng-lng) < BOX_DEG &&
         haversineMeters(lat, lng, r.lat, r.lng) < OVERLAP_THRESHOLD_M
       )
-              || aedState.markers.some(m => {
-                   const p = m.getPosition();
-                   return haversineMeters(lat, lng, p.getLat(), p.getLng()) < OVERLAP_THRESHOLD_M;
-                 });
-  if(!tooClose) return { lat, lng };
-  const dLat = (OFFSET_M/111000);
-  const dLng = (OFFSET_M/(111000*Math.cos(lat*Math.PI/180)));
-  return { lat: lat + dLat, lng: lng + dLng };
+              || (_aedOverlapGrid && isNearExistingAed(lat, lng, OVERLAP_THRESHOLD_M));
+  let finalLat = lat, finalLng = lng;
+  if(tooClose){
+    const dLat = (OFFSET_M/111000);
+    const dLng = (OFFSET_M/(111000*Math.cos(lat*Math.PI/180)));
+    finalLat = lat + dLat; finalLng = lng + dLng;
+  }
+  if(_aedOverlapGrid) addToAedOverlapGrid(finalLat, finalLng); // 다음 AED가 이 위치를 찾을 수 있게 등록
+  return { lat: finalLat, lng: finalLng };
 }
 
 // AED를 여러 개 한꺼번에 그리기 직전에 한 번만 호출 — 지금 화면 범위(+여유분) 안에 있는
@@ -1753,6 +1780,7 @@ function avoidOverlapPosition(lat, lng){
 // 겹칠 수가 없으므로 검사 대상에서 제외해도 결과는 동일하면서 훨씬 빠름.
 let _overlapCheckCache = null;
 function prepareOverlapCheckCache(){
+  resetAedOverlapGrid(); // 새 배치를 그리기 전에 AED끼리 겹침 확인용 격자도 항상 새로 시작함
   try{
     const b = map.getBounds();
     const sw = b.getSouthWest(), ne = b.getNorthEast();
