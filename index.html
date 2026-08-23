@@ -113,6 +113,11 @@
     display:flex;align-items:center;justify-content:center;
     font-size:clamp(9px,2.9vw,17px);font-weight:800;white-space:nowrap;
   }
+  .aed-summary-badge{
+    background:rgba(198,40,40,.92);color:#fff;font-weight:800;font-size:13px;
+    border:2px solid #fff;border-radius:16px;padding:6px 12px;
+    box-shadow:0 3px 10px rgba(0,0,0,.28);cursor:pointer;white-space:nowrap;
+  }
   .nearest-pulse{
     width:22px;height:22px;border-radius:50%;background:var(--orange);
     border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);
@@ -1527,22 +1532,46 @@ async function loadAedNear(lat, lng){
 // 지도 중심에서 고정 반경(AED_DISPLAY_RADIUS_KM) 안에 있는 AED만 걸러서 마커로 그림 — 이미
 // 전부 메모리에 있으므로 API 호출 없이 순수 필터링만 함. 줌 레벨과 무관하게 항상 같은 반경만
 // 계산하므로, 아무리 축소해도 부담이 늘어나지 않음(보건복지부 앱과 동일한 방식).
-const AED_DISPLAY_RADIUS_KM = 10; // 보건복지부 응급의료정보제공 앱과 같은 방식 — 축척(줌)과 무관하게 항상 이 반경만 표시
+// ⚠️ 예전엔 반경이 10km 고정이라, 서울처럼 밀집된 지역에서 아무리 확대해도(50m 축척까지 가도)
+// 여전히 10km 안의 수백 개를 다 처리하려고 해서 버벅였음. 줌 레벨에 따라 반경 자체도 같이
+// 줄어들게 해서, 많이 확대할수록 실제로 필요한 만큼만(적은 개수만) 계산하도록 함.
+function getAedRadiusForZoom(level){
+  // 레벨이 작을수록(확대) 반경도 작게. 레벨 1~3(건물 단위)이면 1km, 그 이상은 레벨당 1km씩 늘려서 최대 10km.
+  return Math.min(10, Math.max(1, level - 2));
+}
+
+const AED_SUMMARY_ZOOM_LEVEL = 8; // ⚠️ 카카오맵 레벨: 이 값 이상(더 축소된 상태)이면 "구 단위 이상"으로 보고 요약 뱃지로 전환.
+                                    // 레벨이 작을수록(확대) 개별 마커, 클수록(축소) 지역 요약 — 값을 조절하면 전환 시점을 바꿀 수 있음.
+let aedSummaryData = null; // aed_summary.json 내용(시/도/시군구별 개수+대표좌표) — 한 번만 받아서 계속 재사용
+
+async function loadAedSummary(){
+  if(aedSummaryData) return aedSummaryData;
+  try{
+    const res = await fetch('./aed_summary.json');
+    aedSummaryData = res.ok ? await res.json() : {};
+  }catch(e){ aedSummaryData = {}; }
+  return aedSummaryData;
+}
 
 function renderAedInViewport(){
   if(!aedState.on || !map) return;
+  const zoomLevel = map.getLevel();
+
+  if(zoomLevel >= AED_SUMMARY_ZOOM_LEVEL){
+    renderAedSummaryMode();
+    return;
+  }
+
+  const radiusKm = getAedRadiusForZoom(zoomLevel);
   let items = aedState.allItems;
   try{
     const c = map.getCenter();
     const cLat = c.getLat(), cLng = c.getLng();
-    // ⚠️ 화면 범위(줌 레벨에 따라 계속 커지는) 대신, 지도 중심에서 고정된 반경만 봄 —
-    // 이러면 아무리 축소해도(전국 단위로 봐도) 항상 이 반경만큼만 계산하면 되므로,
-    // 줌 레벨과 완전히 무관하게 항상 가벼움(보건복지부 앱과 동일한 방식).
-    items = aedState.allItems.filter(a => haversineMeters(cLat, cLng, a.lat, a.lng) <= AED_DISPLAY_RADIUS_KM*1000);
+    items = aedState.allItems.filter(a => haversineMeters(cLat, cLng, a.lat, a.lng) <= radiusKm*1000);
     renderAedCenterMarker(cLat, cLng);
   }catch(e){}
 
-  const key = items.length + ':' + (items[0]?.id||'') + ':' + (items[items.length-1]?.id||'');
+  const key = 'individual:' + radiusKm + ':' + items.length + ':' + (items[0]?.id||'') + ':' + (items[items.length-1]?.id||'');
   if(key === _lastAedRenderedKey) return; // 이전과 완전히 똑같은 내용이면 화면을 아예 안 건드림(깜빡임 방지)
   _lastAedRenderedKey = key;
   clearAedMarkers();
@@ -1552,7 +1581,46 @@ function renderAedInViewport(){
   items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item));
 }
 
-// 지도 중심(=지금 AED를 찾는 기준점)에 표시를 남겨서, "왜 여기서 조금만 벗어나면 안 보이지?"
+// 지도 중심 위경도(+여유분) 안에 대표 좌표가 있는 시/군/구만 골라서, 개별 마커 대신
+// 숫자 뱃지(예: "342")로 표시함 — 개별 AED 위치 계산을 전혀 안 하므로 아무리 넓게 봐도 가벼움.
+let _aedSummaryMarkers = [];
+async function renderAedSummaryMode(){
+  const summary = await loadAedSummary();
+  if(!aedState.on || map.getLevel() < AED_SUMMARY_ZOOM_LEVEL) return; // 로딩 대기 중 줌이 다시 바뀌었으면 무시
+
+  let sigunguList = [];
+  Object.keys(summary).forEach(sido=>{
+    Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
+      const s = summary[sido].sigungu[sg];
+      sigunguList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng });
+    });
+  });
+
+  const key = 'summary:' + sigunguList.length;
+  if(key === _lastAedRenderedKey) return;
+  _lastAedRenderedKey = key;
+
+  clearAedMarkers();
+  _aedSummaryMarkers.forEach(m=>m.setMap(null));
+  _aedSummaryMarkers = [];
+  closeAedInfo();
+  if(_aedCenterMarker){ _aedCenterMarker.setMap(null); _aedCenterMarker = null; } // 요약 모드에선 "내 중심 기준 반경" 개념이 없으므로 중심점 표시도 뺌
+
+  sigunguList.forEach(r=>{
+    const el = document.createElement('div');
+    el.className = 'aed-summary-badge';
+    el.textContent = r.count.toLocaleString();
+    el.title = `${r.label} · AED ${r.count.toLocaleString()}개 — 눌러서 확대`;
+    el.onclick = () => { map.setLevel(AED_SUMMARY_ZOOM_LEVEL-3); map.setCenter(new kakao.maps.LatLng(r.lat, r.lng)); }; // 눌러서 그 지역으로 확대(개별 마커 모드로 자연스럽게 전환됨)
+    const overlay = new kakao.maps.CustomOverlay({
+      position: new kakao.maps.LatLng(r.lat, r.lng), content: el, zIndex: 20, yAnchor: 0.5, xAnchor: 0.5
+    });
+    overlay.setMap(map);
+    _aedSummaryMarkers.push(overlay);
+  });
+}
+
+
 // 하는 혼란을 줄임 — 보건복지부 앱도 중심 표시를 같이 보여줌.
 let _aedCenterMarker = null;
 function renderAedCenterMarker(lat, lng){
