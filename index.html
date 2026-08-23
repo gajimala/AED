@@ -1097,9 +1097,13 @@ async function findNearestAndShow(kind){
       // 문 닫힌 AED로 안내하면 응급상황에 오히려 위험하므로, 운영시간이 아닌 곳은 후보에서 제외함.
       resultBox.innerHTML = '<div class="hint">🚑 주변 AED 확인 중…</div>';
       try{
-        // ⚠️ 전국 AED가 이제 미리 다 받아져 있으므로(loadAedNationwide), 행정구역을 따로
-        // 확인할 필요 없이 바로 전체 목록에서 거리 계산만 하면 됨 — 카카오 API 호출 불필요.
-        if(!_aedNationwideLoaded) await loadAedNationwide();
+        // ⚠️ 진짜 버그였던 부분: 반경 기반 방식으로 바꾸면서 _aedNationwideLoaded 변수 자체를
+        // 없앴는데 여기서 그 이름을 계속 참조하고 있었음(항상 undefined → 매번 재확인 자체는
+        // 됐지만, loadAedNationwide는 "지도 화면 중심" 기준으로만 불러오지 "내 실제 GPS 위치"
+        // 기준이 아니어서, 지도를 다른 곳에 두고 가까운곳 찾기를 누르면 엉뚱한 지역 데이터만
+        // 있어 정작 필요한 내 위치 근처 AED를 못 찾는 문제가 있었음. 내 GPS 위치 기준으로
+        // 직접 필요한 시/도를 불러오도록 고침.
+        await loadAedNear(myLat, myLng);
         const items = aedState.allItems;
         // 운영시간이 지금 아닌 곳(available===false)은 제외. 정보가 없는 곳(null)은 후보로 남겨둠.
         const openItems = items.filter(a => isAedAvailableNow(a).available !== false);
@@ -1484,10 +1488,10 @@ async function loadAedNationwide(){
 
 // 지금 지도 화면(+여유분)과 경계가 겹치는 시/도만 골라냄 — 정밀할 필요 없이 "이 시/도를 아예
 // 안 봐도 되는지"만 빠르게 판단(순수 계산, API 호출 없음).
-function getRelevantSidoForViewport(){
+function getRelevantSidoForViewport(atLat, atLng){
   try{
-    const c = map.getCenter();
-    const cLat = c.getLat(), cLng = c.getLng();
+    let cLat = atLat, cLng = atLng;
+    if(cLat==null || cLng==null){ const c = map.getCenter(); cLat = c.getLat(); cLng = c.getLng(); }
     // ⚠️ 반경(km)을 위경도 여유분으로 대략 환산(정밀할 필요 없음 — 어느 시/도 파일을
     // 받을지만 결정하는 용도, 실제 표시 여부는 renderAedInViewport의 정확한 haversine 계산이 함)
     const padDeg = (AED_DISPLAY_RADIUS_KM / 111) * 1.5; // 여유 있게 1.5배
@@ -1498,6 +1502,26 @@ function getRelevantSidoForViewport(){
       return latMin <= cLat+padDeg && latMax >= cLat-padDeg && lngMin <= cLng+padDeg && lngMax >= cLng-padDeg;
     });
   }catch(e){ return AED_SIDO_LIST; } // 실패하면 안전하게 예전 방식(전체)으로 대체
+}
+
+// 특정 좌표(예: 사용자의 실제 GPS 위치) 근처의 시/도 파일만 불러옴 — 지도 화면 중심과
+// 무관하게, 원하는 지점 기준으로 필요한 데이터를 확보할 때 씀(가까운곳 찾기 등).
+async function loadAedNear(lat, lng){
+  const relevant = getRelevantSidoForViewport(lat, lng);
+  const toFetch = relevant.filter(s => !_aedLoadedSido.has(s));
+  if(!toFetch.length) return;
+  const results = await Promise.allSettled(
+    toFetch.map(sido => fetch(`./aed/${encodeURIComponent(sido)}.json`).then(r => r.ok ? r.json() : []))
+  );
+  results.forEach((r, i) => {
+    _aedLoadedSido.add(toFetch[i]);
+    if(r.status==='fulfilled' && Array.isArray(r.value)){
+      const converted = r.value.map(arr => ({
+        lng: arr[0], lat: arr[1], name: arr[2], address: arr[3], place: arr[4], tel: arr[5], id: arr[6], hoursCompact: arr[7]
+      }));
+      aedState.allItems = aedState.allItems.concat(converted);
+    }
+  });
 }
 
 // 지도 중심에서 고정 반경(AED_DISPLAY_RADIUS_KM) 안에 있는 AED만 걸러서 마커로 그림 — 이미
