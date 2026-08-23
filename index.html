@@ -1596,7 +1596,7 @@ async function fetchAedFresh(sido, sigungu){
 // 잘못됐다"고 알려준 것만 정확히(좌표 기준) 걸러내는 훨씬 안전한 방식으로 바꿈.
 // 새로 잘못된 게 발견되면, 아래 목록에 { lat, lng } 한 줄만 추가하면 됨.
 const AED_HIDDEN_COORDS = [
-  // { lat: 37.10, lng: 130.20 }, // 예시: 한국남부발전삼척빛드림본부 — 바다 위 중복 표시(실제 좌표 확인되는 대로 추가)
+  { lat: 37.171206, lng: 129.395733 }, // 한국남부발전삼척빛드림본부 — 바다 위 중복 표시, 사용자가 직접 확인한 좌표
 ];
 function isHiddenBadCoord(lat, lng){
   return AED_HIDDEN_COORDS.some(c => Math.abs(c.lat-lat) < 0.0005 && Math.abs(c.lng-lng) < 0.0005);
