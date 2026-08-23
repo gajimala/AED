@@ -1055,10 +1055,10 @@ async function initMap(){
   // 지도가 최종 위치(GPS 또는 기본값)로 자리잡은 뒤에 조회해야 엉뚱한 지역으로 조회되지 않음.
   aedState.on = true;
   document.getElementById('aedToggleBtn').classList.add('on');
-  loadAedForCurrentRegion();
+  loadAedNationwide();
 
   // AED를 켜둔 상태에서 지도를 움직이거나 확대/축소하면, 멈췄을 때(idle) 그 위치 기준으로 다시 조회
-  kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) debouncedLoadAed(); });
+  kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) renderAedInViewport(); });
 }
 
 // 우측 상단 버튼으로 언제든 다시 내 위치로 이동(한 번만, 강제 추적 아님)
@@ -1097,14 +1097,10 @@ async function findNearestAndShow(kind){
       // 문 닫힌 AED로 안내하면 응급상황에 오히려 위험하므로, 운영시간이 아닌 곳은 후보에서 제외함.
       resultBox.innerHTML = '<div class="hint">🚑 주변 AED 확인 중…</div>';
       try{
-        const regionName = await coord2RegionName(myLat, myLng);
-        if(!regionName || regionName==='기타'){
-          resultBox.innerHTML = '<div class="msg err" style="display:block;">현재 위치의 행정구역을 확인하지 못했습니다.</div>';
-          return;
-        }
-        const [sido, sigungu] = regionName.split(' ');
-        const cached = readAedCache(sido, sigungu);
-        const items = cached ? cached.items : await fetchAedFresh(sido, sigungu);
+        // ⚠️ 전국 AED가 이제 미리 다 받아져 있으므로(loadAedNationwide), 행정구역을 따로
+        // 확인할 필요 없이 바로 전체 목록에서 거리 계산만 하면 됨 — 카카오 API 호출 불필요.
+        if(!_aedNationwideLoaded) await loadAedNationwide();
+        const items = aedState.allItems;
         // 운영시간이 지금 아닌 곳(available===false)은 제외. 정보가 없는 곳(null)은 후보로 남겨둠.
         const openItems = items.filter(a => isAedAvailableNow(a).available !== false);
         if(!openItems.length){
@@ -1388,32 +1384,48 @@ function populateRegionSelect(){
 function onRegionChange(){
   currentRegionFilter = document.getElementById('regionSelect').value;
   renderAllMarkers();
-  if(aedState.on) loadAedForCurrentRegion();
+  if(aedState.on) renderAedInViewport();
 }
 
 /* =========================================================
    AED(자동심장충격기) 레이어 — 조회 전용, 수정/삭제 없음, 길찾기만 가능
-   ⚠️ 이 키는 브라우저 소스에 그대로 노출됩니다(공개 저장소이므로 누구나 볼 수 있음).
-   나중에 여유 생기면 Cloudflare Worker로 숨기는 걸 권장하지만, 지금은 가입 없이
-   바로 동작하는 걸 우선해서 예전처럼 직접 호출 방식으로 되돌렸습니다.
+   ⚠️ 전면 개편: 예전엔 이 키가 브라우저에 그대로 노출된 채 실시간으로 정부 API를 직접
+   호출했음. 이제는 Cloudflare Worker가 15분마다 미리 전국 AED를 받아서 시/도별 정적
+   파일(aed/*.json)로 GitHub에 저장해두므로, 이 키는 더 이상 클라이언트에 필요 없음
+   (서버 쪽 Worker 환경변수 AED_SERVICE_KEY로 옮겨감 — 브라우저에서 더는 안 보임).
    ========================================================= */
-const AED_SERVICE_KEY_ENCODED = 'TUbUhIiFWVRorR5hyktEuzY05oGV0Wd%2FTohPPdjOB27lUHRN521Oc6cJD%2BityxwoJzleTCzC%2BBYOroBVoyOxhA%3D%3D';
-const AED_API_URL = 'https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire';
 
-let aedState = { on:false, markers:[] };
+let aedState = { on:false, markers:[], allItems:[] };
 let aedClusterer = null;
 let _lastAedRenderedKey = null; // 지금 화면에 떠 있는 AED 목록의 서명 — 내용이 같으면 다시 안 그려서 깜빡임 없앰
-let _lastAedBoundsKey = null, _lastAedRegions = null; // 행정구역 조회 결과 캐시(같은 화면범위 재조회 방지)
+
+// ⚠️ 전면 개편 — 예전엔 지도를 움직일 때마다 카카오로 "여기 어디야?" 확인(5곳) + 그 지역
+// AED 실시간 조회를 매번 반복했음. 이제는 Cloudflare Worker가 15분마다 미리 전국 AED를
+// 받아서 시/도별 정적 파일(aed/서울특별시.json 등)로 GitHub에 저장해두므로, 클라이언트는
+// 그 파일들만 불러오면 됨 — 카카오 API도, 실시간 정부 API 호출도 전혀 필요 없어짐.
+const AED_SIDO_LIST = [
+  '서울특별시','부산광역시','대구광역시','인천광역시','광주광역시','대전광역시','울산광역시',
+  '세종특별자치시','경기도','강원특별자치도','충청북도','충청남도','전북특별자치도','전라북도',
+  '전라남도','경상북도','경상남도','제주특별자치도'
+];
+let _aedNationwideLoaded = false;
 
 function toggleAedLayer(){
   aedState.on = !aedState.on;
   document.getElementById('aedToggleBtn').classList.toggle('on', aedState.on);
   if(aedState.on){
-    loadAedForCurrentRegion();
+    loadAedNationwide();
   } else {
     clearAedMarkers();
     _lastAedRenderedKey = null; // 꺼진 동안엔 화면이 비어있으므로, 다시 켰을 때 내용이 같아도 반드시 다시 그려지게 함
   }
+}
+
+// AED 안내상자에 간단한 안내 문구(로딩중, 에러 등)를 표시함
+function setAedInfoMsg(html){
+  const box = document.getElementById('aedInfoBox');
+  box.classList.add('show');
+  box.innerHTML = `<button id="aedInfoClose" onclick="closeAedInfo()">✕</button><div style="padding-right:20px;">${html}</div>`;
 }
 
 function clearAedMarkers(){
@@ -1422,166 +1434,48 @@ function clearAedMarkers(){
   document.getElementById('aedInfoBox').classList.remove('show');
 }
 
-let _aedDebounceTimer = null;
-function debouncedLoadAed(){
-  // 지도를 계속 움직이는 중(드래그, 연속 줌)에는 그때마다 매번 재조회하지 않고,
-  // 움직임이 잠깐이라도 멈췄을 때 한 번만 조회 — 안 그러면 짧게 팬만 해도 매번
-  // 카카오 행정구역 조회 5번 + AED 조회가 통째로 다시 도는 낭비가 있었음.
-  clearTimeout(_aedDebounceTimer);
-  _aedDebounceTimer = setTimeout(loadAedForCurrentRegion, 350);
+// 시/도별 정적 파일을 전부 불러와 하나로 합침(한 번 불러오면 메모리에 유지 — 재조회 없음).
+// 개별 파일 하나가 없거나(아직 그 시/도 첫 갱신 전) 실패해도 나머지는 정상적으로 계속 진행함.
+async function loadAedNationwide(){
+  if(_aedNationwideLoaded){ renderAedInViewport(); return; } // 이미 다 받아놨으면 화면에 표시만 다시 함(재요청 없음)
+  setAedInfoMsg('AED 정보를 불러오는 중…');
+  const results = await Promise.allSettled(
+    AED_SIDO_LIST.map(sido => fetch(`./aed/${encodeURIComponent(sido)}.json`).then(r => r.ok ? r.json() : []))
+  );
+  let all = [];
+  results.forEach(r => { if(r.status==='fulfilled' && Array.isArray(r.value)) all = all.concat(r.value); });
+  aedState.allItems = all;
+  _aedNationwideLoaded = true;
+  document.getElementById('aedInfoBox').classList.remove('show');
+  renderAedInViewport();
 }
 
-let _lastAedLoadAt = 0;
-async function loadAedForCurrentRegion(){
-  // 초기화 과정에서 지도가 "움직임 멈춤(idle)" 이벤트를 한 번 더 몰래 발생시키는 경우가 있어서
-  // (GPS로 자동 이동, 클러스터러 초기화 등) 직접 호출 + idle 호출이 거의 동시에 겹쳐 실제로
-  // AED API가 두 번 불릴 때가 있었음. 방금 막(1초 이내) 불러온 상태면 그냥 건너뜀.
-  if(Date.now() - _lastAedLoadAt < 1000) return;
-  _lastAedLoadAt = Date.now();
-
-  if(!map){
-    setAedInfoMsg('⚠️ 지도가 아직 준비되지 않았습니다. 화면 위쪽에 지도 로딩 에러 배너가 떠 있는지 확인해주세요 (카카오 앱키/도메인 등록 문제일 수 있어요).');
-    return;
-  }
-
-  // ⚠️ 전국 축척처럼 너무 축소된 상태에서는, 지금 방식(화면 모서리 4곳+중심만 표본 조회)으로는
-  // 딱 그 5곳이 속한 지역의 AED만 반쪽짜리로 나오고 나머지는 빈 화면이 되는 어색한 상태가 됨.
-  // 클러스터링을 써도 이건 "그리기 부담"만 줄여줄 뿐, "제대로 다 안 보이는" 문제 자체는
-  // 해결이 안 되므로, 너무 축소된 단계에서는 아예 조회를 하지 않고 안내만 보여줌
-  // (지도 서비스들이 일반적으로 쓰는 방식과 동일).
-  const AED_MIN_ZOOM_LEVEL = 10; // 카카오맵 레벨: 숫자가 클수록 더 축소된 상태
-  if(map.getLevel() > AED_MIN_ZOOM_LEVEL){
-    clearAedMarkers();
-    setAedInfoMsg('🔍 지도를 조금 더 확대하면 주변 AED가 표시됩니다.');
-    return;
-  }
-  // ⚠️ 예전엔 여기서 매번 "불러오는 중…" 안내상자를 띄웠는데, 캐시가 있어서 사실상 즉시 뜨는
-  // 경우에도 상자가 반짝 나타났다가 제대로 안 닫히는 경우가 있어서 화면이 깜빡이는 것처럼
-  // 보였음. 이제 이 메시지는 fetchAedMulti 안에서 "정말 보여줄 게 아직 없을 때만" 띄움.
-  // ⚠️ 예전엔 "지도 중심 좌표 딱 1곳"의 행정구역만 조회해서, 화면에 두 개 시/군/구가
-  // 걸쳐 보이는 경계 지역에서는 절반의 AED가 누락되는 문제가 있었음. 이제 화면에 실제로
-  // 보이는 범위(모서리 4곳 + 중심)를 전부 표본으로 확인해서, 걸쳐있는 행정구역을 다 조회함.
-  const bounds = map.getBounds();
-  const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
-  const center = map.getCenter();
-
-  // ⚠️ 카카오 좌표→행정구역 조회(5곳) 자체가 매번 몇백ms씩 걸려서, 같은 지역을 다시 봐도
-  // 매번 이 조회부터 다시 하는 게 체감 속도 저하의 큰 원인이었음. 화면 범위를 적당히
-  // 반올림한 값으로 캐시해서, 거의 같은 위치/줌이면 이 단계 자체를 건너뜀.
-  const boundsKey = [sw.getLat(),sw.getLng(),ne.getLat(),ne.getLng()].map(v=>v.toFixed(3)).join(',');
-  let uniqueRegions;
-  if(_lastAedBoundsKey === boundsKey && _lastAedRegions){
-    uniqueRegions = _lastAedRegions;
-  } else {
-    const samplePoints = [
-      center,
-      new kakao.maps.LatLng(sw.getLat(), sw.getLng()),
-      new kakao.maps.LatLng(sw.getLat(), ne.getLng()),
-      new kakao.maps.LatLng(ne.getLat(), sw.getLng()),
-      new kakao.maps.LatLng(ne.getLat(), ne.getLng()),
-    ];
-    const regionResults = await Promise.all(samplePoints.map(p => coord2RegionName(p.getLat(), p.getLng())));
-    uniqueRegions = [...new Set(regionResults.filter(r => r && r !== '기타'))];
-    _lastAedBoundsKey = boundsKey;
-    _lastAedRegions = uniqueRegions;
-  }
-
-  if(!uniqueRegions.length){
-    setAedInfoMsg('⚠️ 현재 지도 위치의 행정구역을 확인하지 못했습니다. 지도를 조금 이동한 뒤 다시 시도해주세요.');
-    return;
-  }
-  const regionPairs = uniqueRegions.map(r => r.split(' '));
-  fetchAedMulti(regionPairs);
-}
-
-function setAedInfoMsg(html){
-  const box = document.getElementById('aedInfoBox');
-  box.classList.add('show');
-  box.innerHTML = `<button id="aedInfoClose" onclick="closeAedInfo()">✕</button><div style="padding-right:20px;">${html}</div>`;
-}
-
-// 화면에 걸친 행정구역이 여러 개면 전부 조회해서 합침(중복 제거)
-async function fetchAedMulti(regionPairs){
+// 지금 화면 범위(+여유분) 안에 있는 AED만 걸러서 마커로 그림 — 이미 전부 메모리에 있으므로
+// API 호출 없이 순수 필터링만 함. 클러스터러가 시각적으로는 알아서 묶어서 보여주므로,
+// 한반도 전체를 봐도(넓게 필터링돼도) 화면에 그려지는 부담은 크지 않음.
+function renderAedInViewport(){
+  if(!aedState.on || !map) return;
+  let items = aedState.allItems;
   try{
-    // 1단계: 캐시가 있는 지역은 즉시 그걸로 먼저 보여줌(체감 속도 개선 — 전국 단위로 봐도 안 버벅임)
-    const cachedPerRegion = regionPairs.map(([sido, sigungu]) => readAedCache(sido, sigungu));
-    const hasAnyCache = cachedPerRegion.some(c => c !== null);
-    if(hasAnyCache){
-      renderAedItems(mergeAedItems(cachedPerRegion.map(c => c ? c.items : [])));
-      closeAedInfo(); // 캐시로 이미 화면에 뭔가 떠 있으니 "불러오는 중" 문구는 필요 없음(안내상자가 안 닫혀서 깜빡이던 원인)
-    } else {
-      setAedInfoMsg('📡 이 지역 AED 정보를 불러오는 중…'); // 정말 보여줄 게 아직 없을 때만 안내
-    }
+    const b = map.getBounds();
+    const sw = b.getSouthWest(), ne = b.getNorthEast();
+    const pad = (ne.getLat()-sw.getLat()) * 0.3; // 화면 경계 바로 바깥도 놓치지 않게 여유를 둠
+    items = aedState.allItems.filter(a =>
+      a.lat >= sw.getLat()-pad && a.lat <= ne.getLat()+pad &&
+      a.lng >= sw.getLng()-pad && a.lng <= ne.getLng()+pad
+    );
+  }catch(e){}
 
-    // 2단계: 실제 최신 데이터를 백그라운드로 조회해서, 캐시와 다르면(정부 데이터가 바뀐 경우)
-    // 화면을 조용히 최신 내용으로 갱신함. 캐시가 없던 지역(첫 조회)은 이 단계를 반드시 기다림.
-    const freshPerRegion = await Promise.all(regionPairs.map(([sido, sigungu]) => fetchAedFresh(sido, sigungu)));
-    const freshMerged = mergeAedItems(freshPerRegion);
-
-    if(!freshMerged.length){
-      if(!hasAnyCache){ clearAedMarkers(); setAedInfoMsg(`이 지역에서 AED 데이터를 찾지 못했습니다.`); }
-      return;
-    }
-    renderAedItems(freshMerged); // renderAedItems 내부에서 "지금 화면과 완전히 같으면" 아예 다시 안 그려서 깜빡임 없음
-    closeAedInfo(); // 데이터가 있으면(캐시였든 방금 새로 받았든) 안내상자는 항상 닫아둠
-  }catch(e){
-    console.error('AED 조회 실패', e);
-    setAedInfoMsg('AED 정보를 불러오지 못했습니다. (원인: 앱키 미설정, 또는 이 API가 브라우저 직접호출을 막는 CORS 정책일 수 있음)');
-  }
-}
-
-function mergeAedItems(resultsPerRegion){
-  const merged = new Map();
-  resultsPerRegion.flat().forEach(item => merged.set(`${item.name}|${item.lat}|${item.lng}`, item)); // 좌표+이름으로 중복 제거
-  return [...merged.values()];
-}
-function renderAedItems(items){
-  const key = JSON.stringify(items);
+  const key = items.length + ':' + (items[0]?.id||'') + ':' + (items[items.length-1]?.id||'');
   if(key === _lastAedRenderedKey) return; // 이전과 완전히 똑같은 내용이면 화면을 아예 안 건드림(깜빡임 방지)
   _lastAedRenderedKey = key;
   clearAedMarkers();
   if(!items.length) return;
-  closeAedInfo(); // 마커가 여러 개 뜨는 정상 케이스면 안내 박스는 닫아서 지도를 가리지 않게 함
-  prepareOverlapCheckCache(); // 겹침 검사용 캐시를 한 번만 준비(성능 최적화)
-  items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item)); // 사용자가 확인해준 잘못된 좌표만 정확히 걸러서 안 그림
+  closeAedInfo();
+  prepareOverlapCheckCache();
+  items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item));
 }
 
-// 한 행정구역(시/군/구)의 AED를 전부 가져옴 — ⚠️ 예전엔 pageNo=1, numOfRows=100 딱 1번만 요청해서
-// 한 지역에 AED가 100개를 넘으면 101번째부터는 통째로 누락됐음. 이제 totalCount를 확인해서
-// 남은 페이지가 있으면 끝까지(최대 안전장치 10페이지=1,000건) 반복 요청함.
-const AED_CACHE_PREFIX = 'aed_cache_v1_';
-const AED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 이 시간이 지나면 캐시를 아예 안 믿고 새로 받아옴(만약을 위한 안전장치)
-
-// 캐시만 읽음(네트워크 요청 없음, 즉시 반환) — 없거나 너무 오래됐으면 null
-function readAedCache(sido, sigungu){
-  try{
-    const cached = JSON.parse(localStorage.getItem(AED_CACHE_PREFIX + sido + '_' + sigungu));
-    if(cached && Date.now() - cached.fetchedAt < AED_CACHE_TTL_MS) return cached;
-  }catch(e){}
-  return null;
-}
-
-// 한 행정구역(시/군/구)의 AED를 실제로 서버에서 가져옴(항상 최신) — ⚠️ 예전엔 pageNo=1, numOfRows=100
-// 딱 1번만 요청해서 한 지역에 AED가 100개를 넘으면 101번째부터는 통째로 누락됐음. 이제 totalCount를
-// 확인해서 남은 페이지가 있으면 끝까지(최대 안전장치 10페이지=1,000건) 반복 요청함.
-async function fetchAedFresh(sido, sigungu){
-  const PAGE_SIZE = 100, MAX_PAGES = 10;
-  let all = [];
-  for(let pageNo=1; pageNo<=MAX_PAGES; pageNo++){
-    const url = `${AED_API_URL}?serviceKey=${AED_SERVICE_KEY_ENCODED}`
-      + `&Q0=${encodeURIComponent(sido)}&Q1=${encodeURIComponent(sigungu)}`
-      + `&pageNo=${pageNo}&numOfRows=${PAGE_SIZE}`;
-    const res = await fetch(url);
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    const text = await res.text();
-    const { items, totalCount } = parseAedXml(text);
-    all = all.concat(items);
-    if(all.length >= totalCount || items.length < PAGE_SIZE) break; // 더 가져올 게 없으면 중단
-  }
-  try{ localStorage.setItem(AED_CACHE_PREFIX + sido + '_' + sigungu, JSON.stringify({ fetchedAt: Date.now(), items: all })); }
-  catch(e){ console.warn('AED 캐시 저장 실패(용량 초과 등) — 다음에도 다시 조회됨', e); }
-  return all;
-}
 
 // ⚠️ 좌표 이상치 감지 — 추가 API 호출 없이 순수 계산만으로 판단함.
 // 같은 시/군/구로 조회된 AED들은 원래 서로 비슷한 범위 안에 모여있어야 정상인데, 그중 유독
@@ -1604,34 +1498,6 @@ const AED_HIDDEN_COORDS = [
 ];
 function isHiddenBadCoord(lat, lng){
   return AED_HIDDEN_COORDS.some(c => Math.abs(c.lat-lat) < 0.0005 && Math.abs(c.lng-lng) < 0.0005);
-}
-function parseAedXml(xmlText){
-  const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
-  const nodes = Array.from(doc.querySelectorAll('item'));
-  const totalCount = parseInt(doc.querySelector('totalCount')?.textContent || '0', 10);
-  const items = nodes.map(n=>{
-    const g = tag => n.querySelector(tag)?.textContent || '';
-    return {
-      name: g('org') || '이름 미상',           // 설치기관명 (예: 동북아무역센터)
-      place: g('buildPlace') || '',            // 세부 설치위치 (예: 60층 피난안전구역)
-      address: g('buildAddress') || '',
-      lat: parseFloat(g('wgs84Lat')),
-      lng: parseFloat(g('wgs84Lon')),
-      tel: g('managerTel') || g('clerkTel') || '',
-      manager: g('manager') || '',
-      model: g('model') || '', mfg: g('mfg') || '',
-      // 요일별 운영시간(HHMM). 0000~2400이면 그 요일은 24시간 운영.
-      monStart:g('monSttTme'), monEnd:g('monEndTme'),
-      tueStart:g('tueSttTme'), tueEnd:g('tueEndTme'),
-      wedStart:g('wedSttTme'), wedEnd:g('wedEndTme'),
-      thuStart:g('thuSttTme'), thuEnd:g('thuEndTme'),
-      friStart:g('friSttTme'), friEnd:g('friEndTme'),
-      satStart:g('satSttTme'), satEnd:g('satEndTme'),
-      sunStart:g('sunSttTme'), sunEnd:g('sunEndTme'),
-      holStart:g('holSttTme'), holEnd:g('holEndTme')
-    };
-  }).filter(a=>!isNaN(a.lat) && !isNaN(a.lng));
-  return { items, totalCount };
 }
 
 // 운영시간 정보를 바탕으로 "지금 이용 가능한지" 계산 (필드명 확정되면 그대로 동작)
