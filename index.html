@@ -39,6 +39,11 @@
     display:flex;flex-direction:column;align-items:center;justify-content:center;
     color:#fff;transition:opacity .5s ease;
   }
+  #splashCredit{
+    position:absolute;left:0;right:0;bottom:calc(28px + env(safe-area-inset-bottom));
+    text-align:center;font-size:12px;line-height:1.7;color:rgba(255,255,255,.65);
+    padding:0 24px;
+  }
   #splash .ring{
     width:64px;height:64px;border-radius:50%;
     border:3px solid rgba(255,255,255,.25);border-top-color:#fff;
@@ -374,6 +379,7 @@
   <div class="ring"></div>
   <h1>인명구조함 지도</h1>
   <p>카카오맵 불러오는 중…</p>
+  <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작: 이환수</div>
 </div>
 
 <!-- 지도 -->
@@ -1566,6 +1572,14 @@ function renderAedInViewport(){
     return;
   }
 
+  // ⚠️ 진짜 버그였던 부분 — 요약 모드(숫자 뱃지)에서 개별 마커 모드로 넘어올 때, 예전 뱃지를
+  // 지우는 코드가 없어서 확대해도 "108" 같은 뱃지가 개별 마커들이랑 같이 계속 떠있었음
+  // (사용자가 실제 화면에서 발견함). 개별 모드로 들어올 때마다 뱃지가 남아있으면 확실히 치움.
+  if(_aedSummaryMarkers.length){
+    _aedSummaryMarkers.forEach(m=>m.setMap(null));
+    _aedSummaryMarkers = [];
+  }
+
   const radiusKm = getAedRadiusForZoom(zoomLevel);
   let items = aedState.allItems;
   try{
@@ -1594,6 +1608,15 @@ async function renderAedSummaryMode(){
   const summary = await loadAedSummary();
   const level = map.getLevel();
   if(!aedState.on || level < AED_SUMMARY_ZOOM_LEVEL) return; // 로딩 대기 중 줌이 다시 바뀌었으면 무시
+
+  // ⚠️ 요약 파일(aed_summary.json)은 서버 배치가 전국 한 바퀴를 다 돌아야만(첫 완주 전까지는
+  // 몇 시간 소요) 생기므로, 그 전에는 이 파일이 비어있는 게 정상임. 빈 화면 대신 "준비 중"
+  // 안내를 보여줘서 고장난 것처럼 보이지 않게 함.
+  if(!summary || !Object.keys(summary).length){
+    clearAedMarkers();
+    setAedInfoMsg('📊 지역별 요약 데이터를 아직 준비 중입니다.<br>조금 더 확대하면 개별 AED 위치가 보여요.');
+    return;
+  }
 
   const showSido = level >= AED_SIDO_SUMMARY_ZOOM_LEVEL;
   let badgeList = [];
