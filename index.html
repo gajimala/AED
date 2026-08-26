@@ -1450,6 +1450,16 @@ let _aedLoadedSido = new Set(); // 지금까지 실제로 내려받은 시/도�
 // 지역은 아무리 작아도 보통 최소 수십 건은 있으므로, 10건 미만이면 문제 있는 상태로 간주.
 const AED_SPARSE_THRESHOLD = 10;
 
+// 주요 지역별 "최소 이 정도는 있어야 정상"인 절대 하한선 — 실제 인구/면적 대비 최소 규모로
+// 보수적으로 잡음(이보다 적으면 거의 확실히 뭔가 잘못된 상태). 목록에 없는(더 작은) 지역은
+// AED_SPARSE_THRESHOLD(10)를 그대로 씀.
+const AED_SIDO_MIN_EXPECTED = {
+  '서울특별시': 800, '경기도': 2000, '부산광역시': 600, '인천광역시': 500,
+  '대구광역시': 500, '대전광역시': 300, '광주광역시': 300, '울산광역시': 200,
+  '경상북도': 500, '경상남도': 500, '전라남도': 400, '전라북도': 400,
+  '전북특별자치도': 400, '충청북도': 400, '충청남도': 400, '강원특별자치도': 400,
+};
+
 // 압축 배열 형식([경도,위도,이름,주소,장소,전화,id,시간압축])을 이름표 붙은 객체로 변환.
 // 캐시 파일 경로와 실시간 보완 경로 둘 다 같은 형식을 쓰므로 공통 함수로 뺌.
 function convertAedArrayFormat(arr){
@@ -1486,6 +1496,12 @@ function clearAedMarkers(){
 // 필요한 양인데 도심 확대 상태에서도 매번 똑같이 다 받음) — 이게 실제 버벅임의 핵심 원인이었음.
 // 이제는 지금 화면(+여유분)에 걸치는 시/도만 필요한 만큼 불러오고, 지도를 움직여 새 지역이
 // 보이면 그때 그 지역 파일만 추가로 불러옴(이미 받은 시/도는 다시 안 받음).
+// ⚠️ 요약 모드(뱃지)는 aed_summary.json의 고정값만 보고 그리는데, 특정 지역이 캐시 부실로
+// 실시간 보완되면 그 "진짜 개수"는 여기 기록해뒀다가, 뱃지를 그릴 때 이 값이 있으면
+// aed_summary.json 값 대신 이 실측값을 우선 사용함(사용자가 실제로 발견한 문제 — 실시간
+// 보완은 되는데 뱃지 숫자엔 반영이 안 되던 것을 고침).
+let _aedLiveFallbackCounts = {}; // { 시도이름: 실제로 받아온 개수 }
+
 async function loadAedNationwide(){
   const relevant = getRelevantSidoForViewport();
   const toFetch = relevant.filter(s => !_aedLoadedSido.has(s));
@@ -1505,11 +1521,13 @@ async function loadAedNationwide(){
       const arr = (r.status==='fulfilled' && Array.isArray(r.value)) ? r.value : [];
       const sido = toFetch[i];
       const expectedCount = summary?.[sido]?.count || 0;
-      // 요약 파일에 아직 그 지역 기준값이 없으면(배치가 그 지역을 아예 안 돈 경우) 예전처럼
-      // 최소 절대 개수(10)로라도 판단함 — 기준값 자체가 없을 때의 안전장치.
-      const isSparse = expectedCount > 0
-        ? arr.length < expectedCount * 0.3
-        : arr.length < AED_SPARSE_THRESHOLD;
+      // ⚠️ 요약 파일과 캐시가 "둘 다 똑같이 틀린" 경우(둘 다 예전의 부실한 값을 가리키고 있으면)
+      // 서로 비교해선 절대 못 잡아냄 — 서로 일치한다고 착각하기 때문(사용자가 실제로 발견한
+      // 문제). 그래서 요약 파일과 무관하게, "이 정도 규모의 지역이면 최소 이만큼은 있어야
+      // 정상"이라는 절대 하한선을 별도로 둬서, 그 아래면 무조건 의심하도록 함.
+      const absoluteFloor = AED_SIDO_MIN_EXPECTED[sido] || AED_SPARSE_THRESHOLD;
+      const isSparse = arr.length < absoluteFloor
+        || (expectedCount > 0 && arr.length < expectedCount * 0.3);
       if(isSparse){
         sparseSido.push(sido); // 캐시가 부실함 — 아래에서 실시간으로 통째로 교체함(합치지 않음)
       } else {
@@ -1525,8 +1543,10 @@ async function loadAedNationwide(){
       liveResults.forEach((r, i) => {
         const arr = (r.status==='fulfilled' && Array.isArray(r.value)) ? r.value : [];
         aedState.allItems = aedState.allItems.concat(convertAedArrayFormat(arr));
-        // 실시간으로 보완했다는 걸 표시해둠 — 나중에 캐시가 채워지면 다시 새로고침해서 정상 캐시로 넘어가면 됨
-        if(arr.length) console.log(`[AED] ${sparseSido[i]}: 캐시 대신 실시간 ${arr.length}건으로 보완함`);
+        if(arr.length){
+          console.log(`[AED] ${sparseSido[i]}: 캐시 대신 실시간 ${arr.length}건으로 보완함`);
+          _aedLiveFallbackCounts[sparseSido[i]] = arr.length; // 요약 뱃지가 이 실측값을 우선 쓰도록 기록
+        }
       });
     }
     document.getElementById('aedInfoBox').classList.remove('show');
@@ -1584,8 +1604,13 @@ function getVisibleWidthKm(){
     const b = map.getBounds();
     const sw = b.getSouthWest(), ne = b.getNorthEast();
     // 가로 폭 기준(같은 위도에서 서쪽 끝~동쪽 끝 거리)
-    return haversineMeters(sw.getLat(), sw.getLng(), sw.getLat(), ne.getLng()) / 1000;
-  }catch(e){ return 10; } // 실패하면 안전하게 중간값으로 대체
+    const km = haversineMeters(sw.getLat(), sw.getLng(), sw.getLat(), ne.getLng()) / 1000;
+    console.log('[AED] 화면 실측 폭:', km.toFixed(2), 'km');
+    return km;
+  }catch(e){
+    console.error('[AED] getVisibleWidthKm 실패 — map.getBounds() 오류:', e.message);
+    return 10;
+  }
 }
 
 // 요청받은 4단계 기준(km) — 화면에 실제로 보이는 폭 기준으로 판단함.
@@ -1688,7 +1713,10 @@ async function renderAedSummaryMode(){
     if(PSEUDO_DISTRICT_LABELS.has(sido)) return;
     if(isSidoTierForThisRegion(sido)){
       // 이 지역은 지금 화면 폭 기준으로 "도시/도 단위"로 뭉쳐 보여줄 때가 됨
-      badgeList.push({ label: sido, count: summary[sido].count, lat: summary[sido].lat, lng: summary[sido].lng, big:true });
+      // ⚠️ 이 지역이 방금 실시간으로 보완된 적 있으면(캐시 부실), 그 실측값을 우선 사용함
+      // (aed_summary.json은 배치가 다음 바퀴를 돌 때까지 옛날 값 그대로일 수 있으므로)
+      const realCount = _aedLiveFallbackCounts[sido] ?? summary[sido].count;
+      badgeList.push({ label: sido, count: realCount, lat: summary[sido].lat, lng: summary[sido].lng, big:true });
     } else {
       // 아직은 구/시/군 단위가 적절함
       Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
@@ -1699,7 +1727,7 @@ async function renderAedSummaryMode(){
     }
   });
 
-  const key = 'summary:' + widthKm.toFixed(1) + ':' + badgeList.length;
+  const key = 'summary:' + widthKm.toFixed(1) + ':' + badgeList.map(b=>b.label+b.count).join(',');
   if(key === _lastAedRenderedKey) return;
   _lastAedRenderedKey = key;
 
