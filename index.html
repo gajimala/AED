@@ -1446,6 +1446,16 @@ const AED_SIDO_LIST = [
 ];
 let _aedLoadedSido = new Set(); // 지금까지 실제로 내려받은 시/도만 기록(중복 다운로드 방지)
 
+// 캐시된 시/도 데이터 개수가 이 값보다 적으면 "부실하다"고 보고 실시간으로 보완함. 실제
+// 지역은 아무리 작아도 보통 최소 수십 건은 있으므로, 10건 미만이면 문제 있는 상태로 간주.
+const AED_SPARSE_THRESHOLD = 10;
+
+// 압축 배열 형식([경도,위도,이름,주소,장소,전화,id,시간압축])을 이름표 붙은 객체로 변환.
+// 캐시 파일 경로와 실시간 보완 경로 둘 다 같은 형식을 쓰므로 공통 함수로 뺌.
+function convertAedArrayFormat(arr){
+  return arr.map(a => ({ lng:a[0], lat:a[1], name:a[2], address:a[3], place:a[4], tel:a[5], id:a[6], hoursCompact:a[7] }));
+}
+
 function toggleAedLayer(){
   aedState.on = !aedState.on;
   document.getElementById('aedToggleBtn').classList.toggle('on', aedState.on);
@@ -1484,18 +1494,34 @@ async function loadAedNationwide(){
     const results = await Promise.allSettled(
       toFetch.map(sido => fetch(`./aed/${encodeURIComponent(sido)}.json`).then(r => r.ok ? r.json() : []))
     );
+    // ⚠️ 캐시 보완용 — 배치가 아직 특정 지역을 다 못 채웠거나(진행 중), 문제로 부실하게 남아있는
+    // 경우를 대비함. 캐시된 개수가 기준(AED_SPARSE_THRESHOLD)보다 너무 적으면, 그 지역만
+    // 정부 API로 즉시 직접 조회해서 "통째로 교체"함(캐시 내용이랑 합치지 않음 — 합치면 같은
+    // 항목이 양쪽에 다 들어있을 때 중복 판정이 애매해지므로, 부실하면 아예 그 자리를
+    // 실시간 결과로 완전히 대체하는 게 훨씬 단순하고 확실함).
+    const sparseSido = [];
     results.forEach((r, i) => {
       _aedLoadedSido.add(toFetch[i]);
-      if(r.status==='fulfilled' && Array.isArray(r.value)){
-        // ⚠️ 저장된 파일은 용량을 줄이려고 배열 형식([경도,위도,이름,주소,장소,전화,id,시간압축])인데,
-        // 여기서 바로 예전부터 쓰던 이름표 붙은 형태로 변환해두면 나머지 코드(마커 렌더링, 정보창,
-        // 운영시간 판별 등)는 전혀 손댈 필요 없이 그대로 동작함.
-        const converted = r.value.map(arr => ({
-          lng: arr[0], lat: arr[1], name: arr[2], address: arr[3], place: arr[4], tel: arr[5], id: arr[6], hoursCompact: arr[7]
-        }));
-        aedState.allItems = aedState.allItems.concat(converted);
+      const arr = (r.status==='fulfilled' && Array.isArray(r.value)) ? r.value : [];
+      if(arr.length < AED_SPARSE_THRESHOLD){
+        sparseSido.push(toFetch[i]); // 캐시가 부실함 — 아래에서 실시간으로 통째로 교체함(합치지 않음)
+      } else {
+        aedState.allItems = aedState.allItems.concat(convertAedArrayFormat(arr));
       }
     });
+
+    if(sparseSido.length){
+      console.warn('캐시가 부실한 지역, 실시간으로 보완:', sparseSido);
+      const liveResults = await Promise.allSettled(
+        sparseSido.map(sido => fetch(`${WORKER_URL}/aed-live?sido=${encodeURIComponent(sido)}`).then(r => r.ok ? r.json() : []))
+      );
+      liveResults.forEach((r, i) => {
+        const arr = (r.status==='fulfilled' && Array.isArray(r.value)) ? r.value : [];
+        aedState.allItems = aedState.allItems.concat(convertAedArrayFormat(arr));
+        // 실시간으로 보완했다는 걸 표시해둠 — 나중에 캐시가 채워지면 다시 새로고침해서 정상 캐시로 넘어가면 됨
+        if(arr.length) console.log(`[AED] ${sparseSido[i]}: 캐시 대신 실시간 ${arr.length}건으로 보완함`);
+      });
+    }
     document.getElementById('aedInfoBox').classList.remove('show');
   }
   renderAedInViewport();
