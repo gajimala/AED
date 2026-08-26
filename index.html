@@ -63,6 +63,15 @@
   }
   #mapError.show{display:block;}
 
+  #debugPanel{
+    position:fixed;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:9998;
+    max-height:35vh;overflow-y:auto;background:rgba(20,20,20,.94);color:#8f8;
+    font-family:monospace;font-size:10.5px;line-height:1.5;padding:10px 12px;border-radius:10px;
+    white-space:pre-wrap;word-break:break-all;box-shadow:0 4px 16px rgba(0,0,0,.4);
+  }
+  #debugPanel .err{color:#f88;}
+  #debugPanel .warn{color:#fd8;}
+
   /* ---------- 좌측 상단 행정구역 필터 ---------- */
   #regionBar{
     position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
@@ -385,6 +394,7 @@
 <!-- 지도 -->
 <div id="map"></div>
 <div id="mapError"></div>
+<div id="debugPanel" style="display:none;"></div>
 
 <!-- 좌측 상단 행정구역 필터 -->
 <div id="regionBar">
@@ -806,6 +816,57 @@
 </div>
 
 <script>
+/* =========================================================
+   화면 안 디버그 패널 — 폰에서 개발자도구 없이도 에러/로그를 바로 볼 수 있게 함.
+   [AED]로 시작하는 로그와 에러(error)는 전부 화면 하단에 표시함. 평소엔 숨겨져있다가
+   그런 로그가 하나라도 뜨면 자동으로 나타남. 우측 상단 X로 닫을 수 있음(다시 로그가
+   뜨면 또 자동으로 나타남).
+   ========================================================= */
+(function(){
+  const panel = document.getElementById('debugPanel');
+  let dismissed = false;
+  function addLine(text, cls){
+    if(dismissed) return;
+    panel.style.display = 'block';
+    const line = document.createElement('div');
+    if(cls) line.className = cls;
+    const time = new Date().toLocaleTimeString('ko-KR', {hour12:false});
+    line.textContent = `[${time}] ${text}`;
+    panel.appendChild(line);
+    panel.scrollTop = panel.scrollHeight;
+    if(!panel.querySelector('.debugClose')){
+      const closeBtn = document.createElement('div');
+      closeBtn.className = 'debugClose';
+      closeBtn.textContent = '✕ 닫기';
+      closeBtn.style.cssText = 'position:sticky;top:0;text-align:right;color:#fff;font-weight:700;padding-bottom:6px;cursor:pointer;';
+      closeBtn.onclick = () => { panel.style.display='none'; dismissed = true; };
+      panel.insertBefore(closeBtn, panel.firstChild);
+    }
+  }
+  const origLog = console.log, origWarn = console.warn, origError = console.error;
+  console.log = function(...args){
+    origLog.apply(console, args);
+    const msg = args.map(a => typeof a==='object' ? JSON.stringify(a) : String(a)).join(' ');
+    if(msg.includes('[AED]')) addLine(msg);
+  };
+  console.warn = function(...args){
+    origWarn.apply(console, args);
+    const msg = args.map(a => typeof a==='object' ? JSON.stringify(a) : String(a)).join(' ');
+    addLine('⚠️ ' + msg, 'warn');
+  };
+  console.error = function(...args){
+    origError.apply(console, args);
+    const msg = args.map(a => typeof a==='object' ? JSON.stringify(a) : String(a)).join(' ');
+    addLine('❌ ' + msg, 'err');
+  };
+  window.addEventListener('error', (e) => {
+    addLine('❌ 처리 안 된 에러: ' + e.message + ' (' + e.filename?.split('/').pop() + ':' + e.lineno + ')', 'err');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    addLine('❌ 처리 안 된 Promise 에러: ' + (e.reason?.message || e.reason), 'err');
+  });
+})();
+
 /* =========================================================
    데이터 계층 — GitHub 저장(lifesavers.json) + Cloudflare Worker
    레코드 구조: {id, lat, lng, addr, note, region, updatedAt}
