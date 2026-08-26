@@ -1675,10 +1675,12 @@ function getVisibleWidthKm(){
 }
 
 // 요청받은 4단계 기준(km) — 화면에 실제로 보이는 폭 기준으로 판단함.
-const AED_TIER_INDIVIDUAL_MAX_KM = 4;   // 이 미만이면: 개별 마커
-const AED_TIER_GU_MAX_KM = 8;           // 4~8km: 구/시/군 단위 요약
-const AED_TIER_METRO_MAX_KM = 16;       // 8~16km: 특별시/광역시 단위(큰 도시는 그 자체로 하나의 단위이므로 시/도와 동일하게 취급)
-                                          // 16km 이상: 도 단위(광역시가 아닌 도 지역들)
+const AED_TIER_INDIVIDUAL_MAX_KM = 1;   // 1km 미만: 개별 마커
+const AED_TIER_GU_MAX_KM = 2;           // 1~2km: 구 단위(동/구 — 가장 세밀한 요약)
+const AED_TIER_SIGUNGU_MAX_KM = 4;      // 2~4km: 시/군 단위(구보다 한 단계 넓게 뭉침) — 특별시/광역시는 이 지점부터 도시 단위로 전환
+const AED_TIER_PROVINCE_MAX_KM = 16;    // 4~16km: 도(道) 지역은 계속 시/군 단위 유지, 16km부터 도 단위로 전환
+                                          // ⚠️ 특별시/광역시(세종 포함)는 도가 아니므로, 16km 넘어도 "도 단위"로 합쳐지지 않고
+                                          // 계속 자기 자신(도시 단위)만 표시함 — 합쳐질 상위 단위 자체가 없음.
 
 // 개별 마커 모드일 때의 반경(km) — 화면에 실제로 보이는 폭의 절반 정도면 충분(화면 밖은 안 보이므로)
 function getAedRadiusForZoom(){
@@ -1753,39 +1755,53 @@ async function renderAedSummaryMode(){
 
   // ⚠️ "중심지역"(세종시 도로명 주소 묶음), "기타"(주소 인식 안 되는 항목 묶음)는 실제
   // 행정구역이 아니라 편의상 만든 임시 분류라서, 뱃지로 같이 뜨면 진짜 구/시/도 뱃지들 사이에
-  // 섞여서 지저분해 보였음(사용자가 직접 지적함). 요약 뱃지에서는 제외하되, 그 안의 AED
-  // 개수 자체는 상위 시/도 합계에는 이미 포함돼 있으므로 데이터가 사라지는 건 아님.
+  // 섞여서 지저분해 보였음. 요약 뱃지에서는 제외하되, 그 안의 AED 개수 자체는 상위 합계에는
+  // 이미 포함돼 있으므로 데이터가 사라지는 건 아님.
   const PSEUDO_DISTRICT_LABELS = new Set(['중심지역', '기타']);
 
-  // ⚠️ 특별시/광역시(+세종)는 땅이 좁아서 8km만 넘어도 이미 도시 전체가 화면에 다 들어옴 —
-  // 그래서 8km부터 도시 단위로 뭉쳐도 자연스러움. 반면 도(道)는 훨씬 넓어서, 8~16km 사이에는
-  // 아직 도 전체의 일부만 보이는 상태라 구/시/군 단위가 더 유용함 — 16km는 넘어야 도 전체가
-  // 뭉쳐 보이는 게 자연스러움. 그래서 지역 종류에 따라 전환 기준(km)을 다르게 둠.
+  // ⚠️ 특별시/광역시(+세종)는 도(道)가 아니라서 애초에 "더 큰 단위로 합쳐질 상위 단위" 자체가
+  // 없음 — 그래서 8~16km 구간부터는 계속 자기 자신(도시 단위)만 표시하고, 16km를 넘어도
+  // 다른 도(道)처럼 상위로 뭉쳐지지 않음(합쳐질 곳이 없으므로 당연함). 반면 도(道)는 훨씬
+  // 넓어서, 16km는 돼야 도 전체가 화면에 뭉쳐 보이는 게 자연스러움.
   const COMPACT_METRO_SIDO = new Set([
     '서울특별시','부산광역시','대구광역시','인천광역시','광주광역시','대전광역시','울산광역시','세종특별자치시'
   ]);
-  function isSidoTierForThisRegion(sido){
-    const threshold = COMPACT_METRO_SIDO.has(sido) ? AED_TIER_GU_MAX_KM : AED_TIER_METRO_MAX_KM;
+
+  // 이 시/도(sido)가 지금 화면 폭 기준으로 "시/도 단위(가장 뭉친 상태)"로 보여줄 때인지 판단.
+  // 특별시/광역시는 4km부터, 도(道)는 16km부터 이 단계에 들어감.
+  function isProvinceTier(sido){
+    const threshold = COMPACT_METRO_SIDO.has(sido) ? AED_TIER_SIGUNGU_MAX_KM : AED_TIER_PROVINCE_MAX_KM;
     return widthKm >= threshold;
   }
 
   let badgeList = [];
   Object.keys(summary).forEach(sido=>{
     if(PSEUDO_DISTRICT_LABELS.has(sido)) return;
-    if(isSidoTierForThisRegion(sido)){
-      // 이 지역은 지금 화면 폭 기준으로 "도시/도 단위"로 뭉쳐 보여줄 때가 됨
-      // ⚠️ 이 지역이 방금 실시간으로 보완된 적 있으면(캐시 부실), 그 실측값을 우선 사용함
-      // (aed_summary.json은 배치가 다음 바퀴를 돌 때까지 옛날 값 그대로일 수 있으므로)
-      const realCount = _aedLiveFallbackCounts[sido] ?? summary[sido].count;
-      badgeList.push({ label: sido, count: realCount, lat: summary[sido].lat, lng: summary[sido].lng, big:true });
-    } else {
-      // 아직은 구/시/군 단위가 적절함
-      Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
-        if(PSEUDO_DISTRICT_LABELS.has(sg)) return;
-        const s = summary[sido].sigungu[sg];
-        badgeList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng, big:false });
-      });
+
+    if(isProvinceTier(sido)){
+      // 시/도 단위(가장 뭉친 상태) — 특별시/광역시는 여기서 더 이상 합쳐질 곳이 없으므로
+      // 이 상태가 사실상 "최종 도시 단위"이고, 도(道)는 진짜 도 전체 단위임.
+      const realCount = _aedLiveFallbackCounts[sido] ?? summary[sido].count; // 실시간 보완된 값 우선
+      badgeList.push({ label: sido, count: realCount, lat: summary[sido].lat, lng: summary[sido].lng, tier:'sido' });
+      return;
     }
+
+    // 아직 시/도 단위까지는 아님 — 시/군 단위로 갈지, 더 세밀한 구 단위로 갈지 결정
+    const showSigunguTier = widthKm >= AED_TIER_SIGUNGU_MAX_KM;
+    Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
+      if(PSEUDO_DISTRICT_LABELS.has(sg)) return;
+      const s = summary[sido].sigungu[sg];
+      if(showSigunguTier || !s.gu || !Object.keys(s.gu).length){
+        // 시/군 단위로 보여줌(구 데이터가 아예 없는 지역이면 이 단계에서 자연스럽게 대체됨)
+        badgeList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng, tier:'sigungu' });
+      } else {
+        // 가장 세밀한 구 단위
+        Object.keys(s.gu).forEach(g=>{
+          const gg = s.gu[g];
+          badgeList.push({ label: g, count: gg.count, lat: gg.lat, lng: gg.lng, tier:'gu' });
+        });
+      }
+    });
   });
 
   const key = 'summary:' + widthKm.toFixed(1) + ':' + badgeList.map(b=>b.label+b.count).join(',');
@@ -1800,11 +1816,10 @@ async function renderAedSummaryMode(){
 
   badgeList.forEach(r=>{
     const el = document.createElement('div');
-    el.className = 'aed-summary-badge' + (r.big ? ' aed-summary-badge-big' : '');
+    el.className = 'aed-summary-badge' + (r.tier==='sido' ? ' aed-summary-badge-big' : '');
     el.textContent = r.count.toLocaleString();
     el.title = `${r.label} · AED ${r.count.toLocaleString()}개 — 눌러서 확대`;
     el.onclick = () => {
-      // 뱃지를 누르면 한 단계 확대(도시/도 단위 뱃지→구 단위, 구 단위→개별 마커)
       map.setLevel(map.getLevel() - 4, {anchor: new kakao.maps.LatLng(r.lat, r.lng)});
       map.setCenter(new kakao.maps.LatLng(r.lat, r.lng));
     };
