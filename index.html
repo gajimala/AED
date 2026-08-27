@@ -1689,12 +1689,6 @@ const AED_TIER_PROVINCE_MAX_KM = 16;    // 4~16km: 도(道) 지역은 계속 시
                                           // ⚠️ 특별시/광역시(세종 포함)는 도가 아니므로, 16km 넘어도 "도 단위"로 합쳐지지 않고
                                           // 계속 자기 자신(도시 단위)만 표시함 — 합쳐질 상위 단위 자체가 없음.
 
-// 개별 마커 모드일 때의 반경(km) — 화면에 실제로 보이는 폭의 절반 정도면 충분(화면 밖은 안 보이므로)
-function getAedRadiusForZoom(){
-  const widthKm = getVisibleWidthKm();
-  return Math.min(10, Math.max(1, widthKm / 2));
-}
-
 let aedSummaryData = null; // aed_summary.json 내용(시/도/시군구별 개수+대표좌표) — 한 번만 받아서 계속 재사용
 
 async function loadAedSummary(){
@@ -1723,16 +1717,24 @@ function renderAedInViewport(){
     _aedSummaryMarkers = [];
   }
 
-  const radiusKm = getAedRadiusForZoom();
+  // ⚠️ 진짜 버그였던 부분 — 원(반경) 모양으로 걸러서, 화면은 네모(직사각형)인데 화면 모서리
+  // 쪽에 있는 AED들이 원 밖으로 빠져서 안 보였음(사용자가 직접 발견함). 화면 범위(사각형)
+  // 그대로 걸러지게 바꿔서, 화면에 실제로 보이는 곳이면 전부 다 나오게 함.
   let items = aedState.allItems;
   try{
+    const b = map.getBounds();
+    const sw = b.getSouthWest(), ne = b.getNorthEast();
+    const padLat = (ne.getLat()-sw.getLat()) * 0.2; // 화면 경계 바로 바깥도 살짝 여유 두고 포함
+    const padLng = (ne.getLng()-sw.getLng()) * 0.2;
+    items = aedState.allItems.filter(a =>
+      a.lat >= sw.getLat()-padLat && a.lat <= ne.getLat()+padLat &&
+      a.lng >= sw.getLng()-padLng && a.lng <= ne.getLng()+padLng
+    );
     const c = map.getCenter();
-    const cLat = c.getLat(), cLng = c.getLng();
-    items = aedState.allItems.filter(a => haversineMeters(cLat, cLng, a.lat, a.lng) <= radiusKm*1000);
-    renderAedCenterMarker(cLat, cLng);
+    renderAedCenterMarker(c.getLat(), c.getLng());
   }catch(e){}
 
-  const key = 'individual:' + radiusKm + ':' + items.length + ':' + (items[0]?.id||'') + ':' + (items[items.length-1]?.id||'');
+  const key = 'individual:' + items.length + ':' + (items[0]?.id||'') + ':' + (items[items.length-1]?.id||'');
   if(key === _lastAedRenderedKey) return; // 이전과 완전히 똑같은 내용이면 화면을 아예 안 건드림(깜빡임 방지)
   _lastAedRenderedKey = key;
   clearAedMarkers();
