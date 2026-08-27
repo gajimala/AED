@@ -1687,10 +1687,10 @@ function getVisibleWidthKm(){
 }
 
 // 요청받은 4단계 기준(km) — 화면에 실제로 보이는 폭 기준으로 판단함.
-const AED_TIER_INDIVIDUAL_MAX_KM = 1;   // 1km 미만: 개별 마커
-const AED_TIER_GU_MAX_KM = 2;           // 1~2km: 구 단위(동/구 — 가장 세밀한 요약)
-const AED_TIER_SIGUNGU_MAX_KM = 4;      // 2~4km: 시/군 단위(구보다 한 단계 넓게 뭉침) — 특별시/광역시는 이 지점부터 도시 단위로 전환
-const AED_TIER_PROVINCE_MAX_KM = 16;    // 4~16km: 도(道) 지역은 계속 시/군 단위 유지, 16km부터 도 단위로 전환
+const AED_TIER_INDIVIDUAL_MAX_KM = 0.25; // ⚠️ 1km→500m로도 서울처럼 밀집된 곳에서 버벅여서(실제 테스트 결과) 250m로 더 낮춤
+const AED_TIER_GU_MAX_KM = 0.5;          // 250~500m: 구 단위(동/구 — 가장 세밀한 요약)
+const AED_TIER_SIGUNGU_MAX_KM = 1;       // 500m~1km: 시/군 단위(구보다 한 단계 넓게 뭉침) — 특별시/광역시는 이 지점부터 도시 단위로 전환
+const AED_TIER_PROVINCE_MAX_KM = 16;     // 1~16km: 도(道) 지역은 계속 시/군 단위 유지, 16km부터 도 단위로 전환
                                           // ⚠️ 특별시/광역시(세종 포함)는 도가 아니므로, 16km 넘어도 "도 단위"로 합쳐지지 않고
                                           // 계속 자기 자신(도시 단위)만 표시함 — 합쳐질 상위 단위 자체가 없음.
 
