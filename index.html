@@ -1660,16 +1660,23 @@ async function loadAedNear(lat, lng){
 // 레벨별 정확한 km 대응표가 없음). 대신 지금 화면의 실제 남서쪽~북동쪽 좌표 사이 거리를
 // 직접 계산(haversine)해서, "진짜 몇 km가 보이는지"를 정확하게 구함 — 이러면 카카오 쪽 레벨
 // 기준이 나중에 바뀌어도 항상 정확하게 동작함.
+// ⚠️ 예전엔 화면 전체 가로 폭을 직접 계산(haversine)했는데, 이게 사람이 화면에서 실제로
+// 보는 "축척 막대(스케일바) 숫자"보다 몇 배 크게 나와서, 뱃지 전환이 사용자가 기대하는
+// 시점보다 훨씬 일찍(더 확대해야만) 일어나는 문제가 있었음(사용자가 직접 발견함).
+// 카카오맵 레벨별 실제 축척 막대 값(정확한 대응표, 카카오 공식 자료 기준)을 그대로 써서,
+// 화면에 보이는 숫자와 완전히 일치하게 함.
+const KAKAO_LEVEL_TO_SCALE_KM = {
+  1: 0.01, 2: 0.02, 3: 0.03, 4: 0.05, 5: 0.1, 6: 0.25, 7: 0.5,
+  8: 1, 9: 2, 10: 4, 11: 8, 12: 16, 13: 32, 14: 64,
+};
 function getVisibleWidthKm(){
   try{
-    const b = map.getBounds();
-    const sw = b.getSouthWest(), ne = b.getNorthEast();
-    // 가로 폭 기준(같은 위도에서 서쪽 끝~동쪽 끝 거리)
-    const km = haversineMeters(sw.getLat(), sw.getLng(), sw.getLat(), ne.getLng()) / 1000;
-    console.log('[AED] 화면 실측 폭:', km.toFixed(2), 'km');
+    const level = map.getLevel();
+    const km = KAKAO_LEVEL_TO_SCALE_KM[level] ?? (level < 1 ? 0.01 : 64); // 표에 없는 범위(더 확대/축소)는 양 끝값으로 대체
+    console.log('[AED] 카카오 레벨:', level, '→ 스케일바:', km, 'km');
     return km;
   }catch(e){
-    console.error('[AED] getVisibleWidthKm 실패 — map.getBounds() 오류:', e.message);
+    console.error('[AED] getVisibleWidthKm 실패 — map.getLevel() 오류:', e.message);
     return 10;
   }
 }
