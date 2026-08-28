@@ -63,15 +63,6 @@
   }
   #mapError.show{display:block;}
 
-  #debugPanel{
-    position:fixed;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:9998;
-    max-height:35vh;overflow-y:auto;background:rgba(20,20,20,.94);color:#8f8;
-    font-family:monospace;font-size:10.5px;line-height:1.5;padding:10px 12px;border-radius:10px;
-    white-space:pre-wrap;word-break:break-all;box-shadow:0 4px 16px rgba(0,0,0,.4);
-  }
-  #debugPanel .err{color:#f88;}
-  #debugPanel .warn{color:#fd8;}
-
   /* ---------- 좌측 상단 행정구역 필터 ---------- */
   #regionBar{
     position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
@@ -394,7 +385,6 @@
 <!-- 지도 -->
 <div id="map"></div>
 <div id="mapError"></div>
-<div id="debugPanel" style="display:none;"></div>
 
 <!-- 좌측 상단 행정구역 필터 -->
 <div id="regionBar">
@@ -816,57 +806,6 @@
 </div>
 
 <script>
-/* =========================================================
-   화면 안 디버그 패널 — 폰에서 개발자도구 없이도 에러/로그를 바로 볼 수 있게 함.
-   [AED]로 시작하는 로그와 에러(error)는 전부 화면 하단에 표시함. 평소엔 숨겨져있다가
-   그런 로그가 하나라도 뜨면 자동으로 나타남. 우측 상단 X로 닫을 수 있음(다시 로그가
-   뜨면 또 자동으로 나타남).
-   ========================================================= */
-(function(){
-  const panel = document.getElementById('debugPanel');
-  let dismissed = false;
-  function addLine(text, cls){
-    if(dismissed) return;
-    panel.style.display = 'block';
-    const line = document.createElement('div');
-    if(cls) line.className = cls;
-    const time = new Date().toLocaleTimeString('ko-KR', {hour12:false});
-    line.textContent = `[${time}] ${text}`;
-    panel.appendChild(line);
-    panel.scrollTop = panel.scrollHeight;
-    if(!panel.querySelector('.debugClose')){
-      const closeBtn = document.createElement('div');
-      closeBtn.className = 'debugClose';
-      closeBtn.textContent = '✕ 닫기';
-      closeBtn.style.cssText = 'position:sticky;top:0;text-align:right;color:#fff;font-weight:700;padding-bottom:6px;cursor:pointer;';
-      closeBtn.onclick = () => { panel.style.display='none'; dismissed = true; };
-      panel.insertBefore(closeBtn, panel.firstChild);
-    }
-  }
-  const origLog = console.log, origWarn = console.warn, origError = console.error;
-  console.log = function(...args){
-    origLog.apply(console, args);
-    const msg = args.map(a => typeof a==='object' ? JSON.stringify(a) : String(a)).join(' ');
-    if(msg.includes('[AED]')) addLine(msg);
-  };
-  console.warn = function(...args){
-    origWarn.apply(console, args);
-    const msg = args.map(a => typeof a==='object' ? JSON.stringify(a) : String(a)).join(' ');
-    addLine('⚠️ ' + msg, 'warn');
-  };
-  console.error = function(...args){
-    origError.apply(console, args);
-    const msg = args.map(a => typeof a==='object' ? JSON.stringify(a) : String(a)).join(' ');
-    addLine('❌ ' + msg, 'err');
-  };
-  window.addEventListener('error', (e) => {
-    addLine('❌ 처리 안 된 에러: ' + e.message + ' (' + e.filename?.split('/').pop() + ':' + e.lineno + ')', 'err');
-  });
-  window.addEventListener('unhandledrejection', (e) => {
-    addLine('❌ 처리 안 된 Promise 에러: ' + (e.reason?.message || e.reason), 'err');
-  });
-})();
-
 /* =========================================================
    데이터 계층 — GitHub 저장(lifesavers.json) + Cloudflare Worker
    레코드 구조: {id, lat, lng, addr, note, region, updatedAt}
@@ -3092,7 +3031,7 @@ function cancelEditCoord(){
   document.getElementById('markerActions').style.display='flex';
   document.getElementById('editActions').style.display='none';
 }
-function saveEditCoord(){
+async function saveEditCoord(){
   const lat = parseFloat(document.getElementById('editLat').value);
   const lng = parseFloat(document.getElementById('editLng').value);
   const addr = document.getElementById('editAddr').value.trim();
@@ -3102,7 +3041,16 @@ function saveEditCoord(){
   }
   const before = markerObjs[currentMarkerId].record;
   const rec = {...before, lat, lng, addr, region: undefined, lastEditSource:'admin'};
-  upsertRecord(rec);
+  // ⚠️ 진짜 버그였던 부분(전수 재검토 중 발견) — 예전엔 저장 결과를 안 기다려서, 서버 저장이
+  // 실제로 실패해도 이력엔 "수정 완료"로 남고 화면 마커도 옮겨진 것처럼 보였음. 이제 저장이
+  // 끝날 때까지 기다렸다가, 성공했을 때만 이력 기록과 화면 갱신을 함.
+  try{
+    await upsertRecord(rec);
+  }catch(e){
+    // upsertRecord 자체가 실패 알림(alert)을 이미 띄우고 _cache도 원래대로 되돌렸으므로,
+    // 여기서는 화면 마커·이력을 건드리지 않고 그대로 종료함(입력값은 남겨서 재시도 가능하게 함).
+    return;
+  }
   logAdminChange('edit', rec.id, addr||before.addr, before.lat, before.lng, lat, lng, '관리자 좌표 직접수정');
   markerObjs[currentMarkerId].record = rec;
   markerObjs[currentMarkerId].marker.setPosition(new kakao.maps.LatLng(lat,lng));
@@ -4117,42 +4065,68 @@ function renderMoreBulkRows(){
     : (bulkFilteredList.length===0 ? `<span style="font-size:12.5px;color:var(--ink-soft);">검색 결과 없음</span>` : '');
 }
 
-function quickDelete(id){
+async function quickDelete(id){
   if(!confirm('이 구조함을 삭제할까요?')) return;
   const rec = markerObjs[id]?.record || loadRecords().find(r=>r.id===id) || {};
-  deleteRecord(id);
+  // ⚠️ 진짜 버그였던 부분(전수 재검토 중 발견) — 예전엔 삭제 결과를 안 기다려서, 서버 삭제가
+  // 실제로 실패해도 이력엔 "삭제 완료"로 남고 화면 마커도 지워진 것처럼 보였음.
+  try{
+    await deleteRecord(id);
+  }catch(e){
+    return; // deleteRecord가 이미 실패 알림을 띄우고 데이터를 원래대로 되돌렸으므로 여기선 그냥 종료
+  }
   logAdminChange('delete', id, rec.addr, rec.lat, rec.lng, null, null, '관리자 대량수정에서 삭제');
   if(markerObjs[id]){ clusterer.removeMarker(markerObjs[id].marker); delete markerObjs[id]; }
   buildBulkEditTable();
 }
-function saveBulkEdit(){
+async function saveBulkEdit(){
   // 지금 화면(검색 결과 + 더보기로 로드된 만큼)에 보이는 행만 저장합니다.
   const rows = document.querySelectorAll('#bulkEditBody tr');
-  let updated = 0, errors = 0;
+  const btn = document.querySelector('button[onclick="saveBulkEdit()"]');
+  if(btn){ btn.disabled = true; btn.textContent = '저장 중…'; }
+
+  const toSave = []; let formatErrors = 0;
   rows.forEach(tr=>{
     const id = tr.dataset.id;
     const lat = parseFloat(tr.querySelector('.be-lat').value);
     const lng = parseFloat(tr.querySelector('.be-lng').value);
     const addr = tr.querySelector('.be-addr').value.trim();
     const note = tr.querySelector('.be-note').value.trim();
-    if(isNaN(lat) || isNaN(lng)){ errors++; return; }
-    const rec = {id, lat, lng, addr, note, region: undefined, lastEditSource:'admin'};
-    upsertRecord(rec);
-    if(markerObjs[id]){
-      markerObjs[id].record = rec;
-      markerObjs[id].marker.setPosition(new kakao.maps.LatLng(lat,lng));
-      markerObjs[id].marker.setImage(pickLifesaverIcon(rec));
+    if(isNaN(lat) || isNaN(lng)){ formatErrors++; return; }
+    toSave.push({id, lat, lng, addr, note, region: undefined, lastEditSource:'admin'});
+  });
+
+  // ⚠️ 진짜 버그였던 부분(전수 재검토 중 발견) — 예전엔 저장 결과를 하나도 안 기다려서,
+  // 여러 건 중 일부가 실제로 실패해도 전부 "저장 완료"로 표시되고 이력에도 그렇게 남았음.
+  // allSettled로 전부 끝날 때까지 기다린 뒤, 실제 성공한 건만 화면·이력에 반영함.
+  const results = await Promise.allSettled(toSave.map(rec => upsertRecord(rec)));
+  let updated = 0, saveErrors = 0;
+  results.forEach((r, i) => {
+    const rec = toSave[i];
+    if(r.status === 'fulfilled'){
+      updated++;
+      if(markerObjs[rec.id]){
+        markerObjs[rec.id].record = rec;
+        markerObjs[rec.id].marker.setPosition(new kakao.maps.LatLng(rec.lat, rec.lng));
+        markerObjs[rec.id].marker.setImage(pickLifesaverIcon(rec));
+      } else {
+        addMarkerToMap(rec);
+      }
     } else {
-      addMarkerToMap(rec);
+      saveErrors++;
     }
-    updated++;
   });
   clusterer.redraw();
   if(updated>0){
     classifyMissingRegions();
     logAdminChange('edit', null, `${updated}건`, null, null, null, null, `관리자 대량수정(표에서 직접 저장) — ${updated}건 변경`);
   }
-  alert(`${updated}건 저장 완료${errors? `, ${errors}건은 좌표 오류로 건너뜀`:''}`);
+  if(btn){ btn.disabled = false; btn.textContent = '보이는 항목 저장'; }
+  const errTotal = formatErrors + saveErrors;
+  let msg = `${updated}건 저장 완료`;
+  if(formatErrors) msg += `, ${formatErrors}건은 좌표 오류로 건너뜀`;
+  if(saveErrors) msg += `, ${saveErrors}건은 서버 저장 실패`;
+  alert(msg);
 }
 </script>
 </body>
