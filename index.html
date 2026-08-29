@@ -1696,6 +1696,12 @@ function renderAedInViewport(){
   if(!items.length) return;
   closeAedInfo();
   prepareOverlapCheckCache();
+  // ⚠️ 요청받은 규칙 — 거리(축척) 기준 대신 "화면에 몇 개 있는지" 개수로 판단함.
+  // 30개 이하면 전부 개별 아이콘으로, 30개를 넘으면 카카오 자체 클러스터러가 묶어서 보여줌.
+  // minLevel을 그때그때 바꿔서 이 규칙을 구현함(30개 이하일 땐 클러스터링 자체를 꺼버림).
+  if(aedClusterer.setMinLevel){
+    aedClusterer.setMinLevel(items.length > 30 ? 1 : 20);
+  }
   items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item));
 }
 
