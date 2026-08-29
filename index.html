@@ -445,10 +445,11 @@
 <button id="addReportEntry" onclick="openReportFlow('add')">➕ 새 구조함 제보</button>
 
 <!-- 사용자용 마커 상세 시트 -->
-<div class="overlay" id="markerOverlay">
+<div class="overlay" id="markerOverlay" onclick="if(event.target===this) closeMarkerSheet();">
   <div class="sheet" id="markerSheet">
     <div class="sheet-handle"></div>
     <div class="msg" id="markerMsg"></div>
+    <img id="mPhoto" style="display:none;width:100%;max-height:200px;object-fit:cover;border-radius:12px;margin-bottom:10px;">
     <div class="addr" id="mAddr">-</div>
     <div class="coord" id="mCoord" style="display:none;">-</div>
 
@@ -466,6 +467,13 @@
         <div><label>경도</label><input type="text" id="editLng"></div>
       </div>
       <div class="row"><div><label>주소/설명</label><input type="text" id="editAddr"></div></div>
+      <div class="row">
+        <div>
+          <label>사진으로 위치 자동입력 (선택)</label>
+          <input type="file" id="editPhotoInput" accept="image/*" capture="environment" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
+          <div id="editPhotoPreview" style="margin-top:6px;"></div>
+        </div>
+      </div>
     </div>
 
     <div class="btn-row" id="markerActions">
@@ -678,6 +686,14 @@
         </div>
         <div class="row"><div><label>주소 / 위치 설명</label><input type="text" id="newAddr" placeholder="예시) 강릉시 강동면 안인진리 159-60"></div></div>
         <div class="row"><div><label>비고 (선택)</label><input type="text" id="newNote" placeholder="예시) 방파제(TTP) 등"></div></div>
+        <div class="row">
+          <div>
+            <label>사진으로 위치 자동입력 (선택)</label>
+            <input type="file" id="newPhotoInput" accept="image/*" capture="environment" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
+            <div id="newPhotoPreview" style="margin-top:6px;"></div>
+            <div class="hint" style="margin-top:4px;">사진에 위치정보(GPS)가 있으면 위도/경도가 자동으로 채워집니다. 필수는 아니며, 직접 입력해도 됩니다.</div>
+          </div>
+        </div>
         <button class="btn btn-primary" onclick="addSingle()">구조함 등록</button>
       </div>
     </div>
@@ -1078,6 +1094,10 @@ async function initMap(){
 
   // AED를 켜둔 상태에서 지도를 움직이거나 확대/축소하면, 멈췄을 때(idle) 그 위치 기준으로 다시 조회
   kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) loadAedNationwide(); });
+  // 지도를 움직이거나 확대·축소를 시작하면 열려있던 마커 설명창을 자동으로 닫음
+  // (닫기 버튼을 굳이 안 눌러도 되게)
+  kakao.maps.event.addListener(map, 'dragstart', ()=>{ closeMarkerSheet(); closeAedInfo(); });
+  kakao.maps.event.addListener(map, 'zoom_start', ()=>{ closeMarkerSheet(); closeAedInfo(); });
 }
 
 // 우측 상단 버튼으로 언제든 다시 내 위치로 이동(한 번만, 강제 추적 아님)
@@ -2133,6 +2153,18 @@ function openMarkerSheet(id){
   // 좌표 수정 / 아이콘 이동 / 삭제는 관리자 모드에서만 노출. 일반 사용자에게는 위치 정보만 보여줌.
   document.getElementById('markerActions').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('markerOverlay').classList.add('show');
+
+  // ⚠️ 사진은 lifesavers.json에 안 넣고(용량 커지면 전체 목록 로딩이 느려지므로) 따로
+  // 필요할 때만(마커 열 때) 불러옴 — 있으면 보여주고, 없으면(404) 조용히 숨김.
+  const photoEl = document.getElementById('mPhoto');
+  photoEl.style.display = 'none';
+  photoEl.src = '';
+  fetch(`${WORKER_URL}/lifesaver-photo/${id}`).then(r => r.ok ? r.json() : null).then(data => {
+    if(data && data.photoDataUrl && currentMarkerId === id){ // 그 사이 다른 마커로 넘어갔으면 무시
+      photoEl.src = data.photoDataUrl;
+      photoEl.style.display = 'block';
+    }
+  }).catch(()=>{});
 }
 /* =========================================================
    민간인 제보(수정/신규/삭제) — 내 위치 → 아이콘 드래그로 위치 제안
@@ -2178,15 +2210,29 @@ function upsertRequestEntry(entry){
   }).catch(e=>console.error('이력 저장 실패', e));
 }
 // 승인/반려 처리 — 상태만 Worker에 기록(실제 반영은 호출한 쪽에서 이미 처리함)
-function resolveRequestEntry(id, status, newTargetId){
+async function resolveRequestEntry(id, status, newTargetId){
   const list = loadRequests();
   const r = list.find(x=>x.id===id);
-  if(r){ r.status = status; r.resolvedAt = Date.now(); if(newTargetId) r.targetId = newTargetId; }
-  fetch(`${WORKER_URL}/reports/${id}`, {
-    method:'PUT',
-    headers:{ 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
-    body: JSON.stringify({ status, targetId: newTargetId })
-  }).catch(e=>console.error('상태 저장 실패', e));
+  if(!r) return;
+  // ⚠️ 진짜 버그였던 부분(전수 재검토 중 발견) — 예전엔 서버 저장 결과를 안 기다려서, 실패해도
+  // 화면(이 세션 동안 계속 쓰이는 _reqCache)엔 "승인됨/반려됨"으로 계속 보였음. 앱을 새로
+  // 열면 서버는 여전히 "대기중"일 수 있어 상태가 어긋나는 문제가 있었음. 이제 저장이 실제로
+  // 끝날 때까지 기다렸다가, 실패하면 화면 상태도 원래대로 되돌림.
+  const before = { status: r.status, resolvedAt: r.resolvedAt, targetId: r.targetId };
+  r.status = status; r.resolvedAt = Date.now(); if(newTargetId) r.targetId = newTargetId;
+  try{
+    const res = await fetch(`${WORKER_URL}/reports/${id}`, {
+      method:'PUT',
+      headers:{ 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
+      body: JSON.stringify({ status, targetId: newTargetId })
+    });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+  }catch(e){
+    console.error('상태 저장 실패 — 화면 상태를 원래대로 되돌립니다', e);
+    r.status = before.status; r.resolvedAt = before.resolvedAt; r.targetId = before.targetId;
+    alert('상태 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    throw e; // 호출한 쪽(approveRequest 등)이 이 실패를 알고 화면을 다시 안 그리게 함
+  }
 }
 // 이력/제보 항목 자체를 삭제 — 관리자 코드 확인 후에만 진행(데이터 반영과는 무관, 기록만 지움)
 function deleteRequestEntry(id){
@@ -2532,6 +2578,67 @@ async function applyApprovedChange(entry, isCivilianAuto){
 }
 
 /* ---- 최소 EXIF GPS 파서 (JPEG 전용, 외부 라이브러리 없이 직접 구현) ---- */
+// ⚠️ 관리자 신규입력/좌표수정 화면에서 "사진으로 위치 자동입력" 기능 — 필수 아니고 보조 수단.
+// 사진에 GPS 정보가 있으면 위도/경도를 자동으로 채워줌(그래도 직접 수정 가능). 사진 자체는
+// 저장 버튼을 눌러 실제 레코드가 만들어진 뒤에 그 id로 업로드됨(아직 id가 없는 신규입력의
+// 경우 저장 성공 후에 업로드).
+let _adminPhotoDataUrl = { newLat: null, editLat: null }; // 입력창 id 기준으로 임시 보관
+
+function handleAdminPhotoCapture(file, latId, lngId, previewId){
+  if(!file) return;
+  const preview = document.getElementById(previewId);
+  preview.innerHTML = '<div class="hint">사진 처리 중…</div>';
+
+  // 1) 축소 썸네일 생성(저장 용량 절약 — 민간인 제보 때와 동일한 방식)
+  const imgUrl = URL.createObjectURL(file);
+  const imgEl = new Image();
+  imgEl.onload = ()=>{
+    const maxW = 480;
+    const scale = Math.min(1, maxW / imgEl.width);
+    const canvas = document.createElement('canvas');
+    canvas.width = imgEl.width * scale;
+    canvas.height = imgEl.height * scale;
+    canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+    _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
+    preview.innerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
+    URL.revokeObjectURL(imgUrl);
+  };
+  imgEl.src = imgUrl;
+
+  // 2) 원본 바이트에서 EXIF GPS 파싱 → 위도/경도 입력칸 자동 채움
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const gps = parseExifGPS(e.target.result);
+    const badge = document.createElement('div');
+    if(gps){
+      document.getElementById(latId).value = gps.lat.toFixed(6);
+      document.getElementById(lngId).value = gps.lng.toFixed(6);
+      if(latId === 'newLat') onNewLatLngTyped(); // 신규입력 화면은 지도 위 아이콘도 같이 옮겨야 하므로 이 함수 재사용
+      badge.className = 'gps-badge ok';
+      badge.textContent = `📍 사진에서 위치 자동입력됨 (${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)})`;
+    } else {
+      badge.className = 'gps-badge warn';
+      badge.textContent = '⚠️ 사진에서 위치정보를 찾지 못했습니다 — 위도/경도를 직접 입력해주세요';
+    }
+    preview.appendChild(badge);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// 저장이 실제로 성공한 뒤, 그 레코드 id로 방금 찍은 사진을 업로드함(실패해도 구조함 등록/수정
+// 자체는 이미 끝난 상태이므로 조용히 무시 — 사진은 부가 기능일 뿐 핵심 저장을 막으면 안 됨).
+async function uploadAdminPhotoIfAny(id, latId){
+  const photoDataUrl = _adminPhotoDataUrl[latId];
+  if(!photoDataUrl) return;
+  try{
+    await fetch(`${WORKER_URL}/lifesaver-photo/${id}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ photoDataUrl })
+    });
+  }catch(e){ console.warn('사진 업로드 실패(구조함 저장 자체는 정상 완료됨):', e); }
+  _adminPhotoDataUrl[latId] = null;
+}
+
 function parseExifGPS(arrayBuffer){
   try{
     const view = new DataView(arrayBuffer);
@@ -3094,6 +3201,9 @@ async function saveEditCoord(){
   markerObjs[currentMarkerId].marker.setPosition(new kakao.maps.LatLng(lat,lng));
   markerObjs[currentMarkerId].marker.setImage(pickLifesaverIcon(rec)); // 옅은 주황(관리자 수정)으로 즉시 갱신
   clusterer.redraw();
+  uploadAdminPhotoIfAny(rec.id, 'editLat'); // 사진을 찍었으면 업로드(실패해도 좌표 저장 자체엔 영향 없음)
+  document.getElementById('editPhotoPreview').innerHTML = '';
+  document.getElementById('editPhotoInput').value = '';
   cancelEditCoord();
   classifyMissingRegions();
   refreshMarkerSheetIfOpen(currentMarkerId, '좌표가 저장되었습니다.');
@@ -3593,7 +3703,7 @@ async function approveRequest(id){
   if(btn){ btn.disabled = true; btn.textContent = '⏳ 처리 중…'; }
   try{
     await applyApprovedChange(req); // ⚠️ 실제 저장이 끝나길 기다려서, 저장 성공했을 때만 "승인"으로 기록되게 함
-    resolveRequestEntry(id, 'approved', req.targetId);
+    await resolveRequestEntry(id, 'approved', req.targetId);
   }catch(e){
     console.error('제보 승인 처리 실패', e);
     alert('저장에 실패해서 승인 처리를 하지 못했습니다. 잠시 후 다시 시도해주세요.');
@@ -3604,10 +3714,17 @@ async function approveRequest(id){
   buildBulkEditTable();
 }
 
-function rejectRequest(id){
+async function rejectRequest(id){
   const req = loadRequests().find(r=>r.id===id);
   if(!req) return;
-  resolveRequestEntry(id, 'rejected');
+  const btn = document.querySelector(`button[onclick="rejectRequest('${id}')"]`);
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 처리 중…'; }
+  try{
+    await resolveRequestEntry(id, 'rejected');
+  }catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = '반려'; }
+    return; // resolveRequestEntry가 이미 실패 알림을 띄웠으므로 여기선 조용히 종료
+  }
   renderRequestsList();
 }
 
@@ -3651,9 +3768,9 @@ async function revertChange(id){
     classifyMissingRegions();
     refreshNewMapPickerMarkers();
 
-    resolveRequestEntry(id, 'reverted'); // 원래 이력 항목 하나만 상태를 바꿈 — 새 이력을 따로 만들지 않음
+    await resolveRequestEntry(id, 'reverted'); // 원래 이력 항목 하나만 상태를 바꿈 — 새 이력을 따로 만들지 않음
   }catch(e){
-    // upsertRecord/deleteRecord가 실패하면 이미 자체적으로 alert를 띄웠으므로 여기선 버튼만 원상복구
+    // upsertRecord/deleteRecord/resolveRequestEntry 중 하나가 실패하면 이미 자체적으로 alert를 띄웠으므로 여기선 버튼만 원상복구
     console.error('취소 처리 실패', e);
     if(btn){ btn.disabled = false; btn.textContent = '🚫 이 변경 취소'; }
     return; // 이력 상태를 "취소완료"로 바꾸지 않음 — 실제로 실패했으므로
@@ -3685,6 +3802,9 @@ async function addSingle(){
   }
   logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력');
   classifyMissingRegions();
+  uploadAdminPhotoIfAny(rec.id, 'newLat'); // 사진을 찍었으면 방금 만들어진 id로 업로드(실패해도 등록 자체엔 영향 없음)
+  document.getElementById('newPhotoPreview').innerHTML = '';
+  document.getElementById('newPhotoInput').value = '';
   msg.textContent='등록되었습니다. 지도에 즉시 반영됩니다.'; msg.className='msg ok'; msg.style.display='block';
   document.getElementById('newLat').value='';
   document.getElementById('newLng').value='';
