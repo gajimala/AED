@@ -1491,6 +1491,12 @@ function setAedInfoMsg(html){
 function clearAedMarkers(){
   if(aedClusterer) aedClusterer.clear();
   aedState.markers = [];
+  // ⚠️ 진짜 버그였던 부분 — 지역 요약 뱃지(_aedSummaryMarkers)는 안 지워서, AED를 껐다 켜면
+  // 예전 뱃지가 화면에 그대로 남아있다가 새 걸로 겹쳐 보이는 문제가 있었음(사용자가 발견함).
+  if(_aedSummaryMarkers && _aedSummaryMarkers.length){
+    _aedSummaryMarkers.forEach(m=>m.setMap(null));
+    _aedSummaryMarkers = [];
+  }
   document.getElementById('aedInfoBox').classList.remove('show');
 }
 
@@ -1631,8 +1637,13 @@ function getVisibleWidthKm(){
 // 250m~2km는 카카오가 알아서 화면 기준으로 묶어서 보여줌(클릭하면 확대되는 기본 동작도
 // 카카오가 원래 제공하는 기능이라 별도 구현 없이 그대로 작동함). 그래서 "개별 마커 모드"의
 // 상한선만 2km로 늘리면 됨 — 나머지는 카카오가 알아서 처리함.
-const AED_TIER_INDIVIDUAL_MAX_KM = 2;   // 2km까지는 개별 마커를 그대로 클러스터러에 넘김(250m부터는 카카오가 자동으로 화면 기준 묶음)
-const AED_TIER_PROVINCE_MAX_KM = 16;     // 2km~16km: 도(道) 지역은 시/군 단위 유지, 16km부터 도 단위로 전환
+// ⚠️ 재설계 — 카카오 자체 클러스터러(실시간 계산)가 서울처럼 밀집된 곳에서 500m 이상부터
+// 다시 버벅였음(실제 테스트로 확인됨). 그래서 500m부터는 다시 "서버가 미리 계산해둔"
+// 구/시군/도 단위로 되돌림 — 이러면 그때그때 계산할 필요 없이 미리 만들어둔 숫자만 읽으면
+// 되므로 훨씬 가벼움. 개별 마커(+카카오 실시간 클러스터링)는 500m 미만에서만 사용함.
+const AED_TIER_INDIVIDUAL_MAX_KM = 0.25; // 250m까지만 개별(카카오가 자동으로 화면 기준 묶음)
+const AED_TIER_GU_MAX_KM = 2;            // 250m~2km: 구 단위(은평구, 서대문구 등 — 가장 세밀한 사전계산 단위)
+const AED_TIER_PROVINCE_MAX_KM = 16;     // 16km부터: 도(道) 단위로 전환(특별시/광역시는 자기 자신 유지)
                                           // ⚠️ 특별시/광역시(세종 포함)는 도가 아니므로, 16km 넘어도 "도 단위"로 합쳐지지 않고
                                           // 계속 자기 자신(도시 단위)만 표시함 — 합쳐질 상위 단위 자체가 없음.
 
@@ -1745,9 +1756,10 @@ async function renderAedSummaryMode(generation){
   ]);
 
   // 이 시/도(sido)가 지금 화면 폭 기준으로 "시/도 단위(가장 뭉친 상태)"로 보여줄 때인지 판단.
-  // 특별시/광역시는 요약 모드에 들어오는 순간(2km+)부터 곧바로, 도(道)는 16km부터 이 단계에 들어감.
+  // 특별시/광역시는 2km부터, 도(道)는 16km부터 이 단계에 들어감.
   function isProvinceTier(sido){
-    return COMPACT_METRO_SIDO.has(sido) || widthKm >= AED_TIER_PROVINCE_MAX_KM;
+    const threshold = COMPACT_METRO_SIDO.has(sido) ? AED_TIER_GU_MAX_KM : AED_TIER_PROVINCE_MAX_KM;
+    return widthKm >= threshold;
   }
 
   let badgeList = [];
@@ -1764,10 +1776,20 @@ async function renderAedSummaryMode(generation){
 
     // 아직 시/도 단위까지는 아님 — 시/군 단위로 보여줌 (더 세밀한 구 단위는 이제 카카오
     // 자체 클러스터러(250m~2km 구간)가 담당하므로, 여기서는 항상 시/군 단위만 씀)
+    const showSigunguTier = widthKm >= AED_TIER_GU_MAX_KM;
     Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
       if(PSEUDO_DISTRICT_LABELS.has(sg)) return;
       const s = summary[sido].sigungu[sg];
-      badgeList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng, tier:'sigungu' });
+      if(showSigunguTier || !s.gu || !Object.keys(s.gu).length){
+        // 시/군 단위(구 데이터가 아예 없는 지역이면 이 단계에서 자연스럽게 대체됨)
+        badgeList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng, tier:'sigungu' });
+      } else {
+        // 가장 세밀한 구 단위 — 서버가 미리 계산해둔 값을 그대로 씀(은평구, 서대문구 등)
+        Object.keys(s.gu).forEach(g=>{
+          const gg = s.gu[g];
+          badgeList.push({ label: g, count: gg.count, lat: gg.lat, lng: gg.lng, tier:'gu' });
+        });
+      }
     });
   });
 
