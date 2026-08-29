@@ -1033,12 +1033,11 @@ async function initMap(){
   aedClusterer = new kakao.maps.MarkerClusterer({
     map: map,
     averageCenter: true,
-    // ⚠️ 예전엔 minLevel:6로 카카오맵 자체 클러스터링을 켜뒀었는데, 이제는 우리가 직접 만든
-    // 4단계 요약 시스템(개별/구/시군/도)이 모든 묶음 판단을 하고 있어서, 카카오 자체
-    // 클러스터링이 동시에 작동하면 서로 겹쳐서 "1km 이하인데도 묶여 보이는" 문제가 생겼음
-    // (사용자가 직접 발견함). 카카오 레벨은 최대 14 정도라, minLevel을 그보다 훨씬 높게
-    // 잡아서 카카오 자체 클러스터링은 사실상 완전히 꺼두고, 묶음 판단은 전부 우리 로직만 함.
-    minLevel: 20,
+    // ⚠️ 다시 켬 — 250m~2km 구간은 화면에 보이는 개별 마커를 카카오 자체 클러스터러로
+    // 묶어서 보여주기로 함(지역 데이터 기반 뱃지 대신). 카카오 레벨 6 = 250m(표 기준)이라
+    // 여기서부터 묶이기 시작함. 2km(레벨 9)를 넘으면 코드에서 이 클러스터러를 비우고
+    // 지역 기반 요약(시/군/도)으로 넘어감 — 그건 별도로 처리함.
+    minLevel: 6,
     gridSize: 120,
     disableClickZoom: false,
     calculator: [10, 50, 100],
@@ -1626,10 +1625,14 @@ function getVisibleWidthKm(){
 }
 
 // 요청받은 4단계 기준(km) — 화면에 실제로 보이는 폭 기준으로 판단함.
-const AED_TIER_INDIVIDUAL_MAX_KM = 0.1;  // ⚠️ 250m로도 여전히 버벅여서(실제 테스트) 100m로 더 낮춤
-const AED_TIER_GU_MAX_KM = 0.25;         // 100~250m: 구 단위(동/구 — 가장 세밀한 요약)
-const AED_TIER_SIGUNGU_MAX_KM = 0.5;     // 250~500m: 시/군 단위(구보다 한 단계 넓게 뭉침) — 특별시/광역시는 이 지점부터 도시 단위로 전환
-const AED_TIER_PROVINCE_MAX_KM = 16;     // 1~16km: 도(道) 지역은 계속 시/군 단위 유지, 16km부터 도 단위로 전환
+// ⚠️ 요청받은 대로 재설계 — 250m~2km 구간은 "지역 데이터 기반 뱃지" 대신, 화면에 보이는
+// 개별 마커를 그대로 카카오 자체 클러스터러에 넘기는 방식으로 바꿈. 카카오 클러스터러의
+// minLevel:6(250m)이 이미 설정돼 있어서, 250m 미만은 자동으로 완전 개별로 보이고
+// 250m~2km는 카카오가 알아서 화면 기준으로 묶어서 보여줌(클릭하면 확대되는 기본 동작도
+// 카카오가 원래 제공하는 기능이라 별도 구현 없이 그대로 작동함). 그래서 "개별 마커 모드"의
+// 상한선만 2km로 늘리면 됨 — 나머지는 카카오가 알아서 처리함.
+const AED_TIER_INDIVIDUAL_MAX_KM = 2;   // 2km까지는 개별 마커를 그대로 클러스터러에 넘김(250m부터는 카카오가 자동으로 화면 기준 묶음)
+const AED_TIER_PROVINCE_MAX_KM = 16;     // 2km~16km: 도(道) 지역은 시/군 단위 유지, 16km부터 도 단위로 전환
                                           // ⚠️ 특별시/광역시(세종 포함)는 도가 아니므로, 16km 넘어도 "도 단위"로 합쳐지지 않고
                                           // 계속 자기 자신(도시 단위)만 표시함 — 합쳐질 상위 단위 자체가 없음.
 
@@ -1742,10 +1745,9 @@ async function renderAedSummaryMode(){
   ]);
 
   // 이 시/도(sido)가 지금 화면 폭 기준으로 "시/도 단위(가장 뭉친 상태)"로 보여줄 때인지 판단.
-  // 특별시/광역시는 4km부터, 도(道)는 16km부터 이 단계에 들어감.
+  // 특별시/광역시는 요약 모드에 들어오는 순간(2km+)부터 곧바로, 도(道)는 16km부터 이 단계에 들어감.
   function isProvinceTier(sido){
-    const threshold = COMPACT_METRO_SIDO.has(sido) ? AED_TIER_SIGUNGU_MAX_KM : AED_TIER_PROVINCE_MAX_KM;
-    return widthKm >= threshold;
+    return COMPACT_METRO_SIDO.has(sido) || widthKm >= AED_TIER_PROVINCE_MAX_KM;
   }
 
   let badgeList = [];
@@ -1760,21 +1762,12 @@ async function renderAedSummaryMode(){
       return;
     }
 
-    // 아직 시/도 단위까지는 아님 — 시/군 단위로 갈지, 더 세밀한 구 단위로 갈지 결정
-    const showSigunguTier = widthKm >= AED_TIER_SIGUNGU_MAX_KM;
+    // 아직 시/도 단위까지는 아님 — 시/군 단위로 보여줌 (더 세밀한 구 단위는 이제 카카오
+    // 자체 클러스터러(250m~2km 구간)가 담당하므로, 여기서는 항상 시/군 단위만 씀)
     Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
       if(PSEUDO_DISTRICT_LABELS.has(sg)) return;
       const s = summary[sido].sigungu[sg];
-      if(showSigunguTier || !s.gu || !Object.keys(s.gu).length){
-        // 시/군 단위로 보여줌(구 데이터가 아예 없는 지역이면 이 단계에서 자연스럽게 대체됨)
-        badgeList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng, tier:'sigungu' });
-      } else {
-        // 가장 세밀한 구 단위
-        Object.keys(s.gu).forEach(g=>{
-          const gg = s.gu[g];
-          badgeList.push({ label: g, count: gg.count, lat: gg.lat, lng: gg.lng, tier:'gu' });
-        });
-      }
+      badgeList.push({ label: sg, count: s.count, lat: s.lat, lng: s.lng, tier:'sigungu' });
     });
   });
 
@@ -1794,7 +1787,11 @@ async function renderAedSummaryMode(){
     el.textContent = r.count.toLocaleString();
     el.title = `${r.label} · AED ${r.count.toLocaleString()}개 — 눌러서 확대`;
     el.onclick = () => {
-      map.setLevel(map.getLevel() - 4, {anchor: new kakao.maps.LatLng(r.lat, r.lng)});
+      // ⚠️ 예전엔 레벨을 4단계나 한꺼번에 건너뛰어서, 도 단위 뱃지를 누르면 순식간에 개별
+      // 마커 근처까지 확 뛰어버리는 극단적인 확대가 됐음(사용자가 직접 발견함). 이제는
+      // 딱 다음 단계(한 칸)만 가깝게 이동해서, 도→시/군→클러스터→개별 순으로 자연스럽게
+      // 단계별로 확대되게 함. 더 확대하고 싶으면 다시 누르면 됨.
+      map.setLevel(map.getLevel() - 2, {anchor: new kakao.maps.LatLng(r.lat, r.lng)});
       map.setCenter(new kakao.maps.LatLng(r.lat, r.lng));
     };
     const overlay = new kakao.maps.CustomOverlay({
