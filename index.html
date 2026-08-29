@@ -1647,30 +1647,20 @@ async function loadAedSummary(){
   return aedSummaryData;
 }
 
+let _aedRenderGeneration = 0; // ⚠️ 확대·축소를 빠르게 반복하면(핀치줌 등) 이전 비동기 요약 렌더링이 끝나기 전에
+                                // 새 렌더링이 시작될 수 있음 — 그러면 늦게 끝난 예전 요청이 새 화면 위에
+                                // 뱃지를 겹쳐 그려서 "클러스터+지역뱃지가 동시에 보이는" 문제가 생김
+                                // (사용자가 실제로 발견함). 매번 호출될 때마다 세대 번호를 올리고, 비동기
+                                // 함수는 자기가 시작될 때의 세대 번호를 기억해뒀다가, 끝날 때 그 사이에 더
+                                // 최신 요청이 없었는지 확인해서 있으면 조용히 자기 결과를 버림.
 function renderAedInViewport(){
   if(!aedState.on || !map) return;
+  _aedRenderGeneration++;
+  const myGeneration = _aedRenderGeneration;
   const widthKm = getVisibleWidthKm();
 
-  // ⚠️ 요청받은 기능 — 지금 클러스터(구 단위 등)로 뭉쳐서 보여주는 것과는 완전히 별개로,
-  // "만약 클러스터가 없었다면 이 화면에 실제로 개별 마커가 몇 개 뜰지"를 순수 숫자로 계산해서
-  // 화면 중심에 표시함. 200m~1km 구간에서만 보여줌(그 구간에서 궁금해했던 것). 클러스터
-  // 표시(뱃지든 개별 마커든) 자체는 전혀 안 건드림 — 이 라벨은 그 위에 얹히는 정보일 뿐임.
-  try{
-    const b = map.getBounds();
-    const sw = b.getSouthWest(), ne = b.getNorthEast();
-    const rawCount = aedState.allItems.filter(a =>
-      a.lat >= sw.getLat() && a.lat <= ne.getLat() && a.lng >= sw.getLng() && a.lng <= ne.getLng()
-    ).length;
-    const c = map.getCenter();
-    if(widthKm >= 0.2 && widthKm <= 1){
-      renderAedCountLabel(rawCount, c.getLat(), c.getLng());
-    } else if(_aedCountLabel){
-      _aedCountLabel.setMap(null); _aedCountLabel = null;
-    }
-  }catch(e){}
-
   if(widthKm >= AED_TIER_INDIVIDUAL_MAX_KM){
-    renderAedSummaryMode();
+    renderAedSummaryMode(myGeneration);
     return;
   }
 
@@ -1713,8 +1703,12 @@ function renderAedInViewport(){
 // 숫자 뱃지(예: "342")로 표시함 — 개별 AED 위치 계산을 전혀 안 하므로 아무리 넓게 봐도 가벼움.
 let _aedSummaryMarkers = [];
 
-async function renderAedSummaryMode(){
+async function renderAedSummaryMode(generation){
   const summary = await loadAedSummary();
+  // ⚠️ 방금 기다리는 동안(비동기 로딩 중) 더 최신 렌더링 요청이 이미 시작됐으면, 이 오래된
+  // 요청은 화면에 아무것도 안 그리고 조용히 멈춤 — 이래야 낡은 결과가 새 화면 위에 겹쳐
+  // 그려지는 일이 없음.
+  if(generation !== _aedRenderGeneration) return;
   const widthKm = getVisibleWidthKm();
   if(!aedState.on || widthKm < AED_TIER_INDIVIDUAL_MAX_KM) return; // 로딩 대기 중 화면이 다시 바뀌었으면 무시
 
@@ -1815,18 +1809,6 @@ function renderAedCenterMarker(lat, lng){
   _aedCenterMarker.setMap(map);
 }
 
-// 200m~1km 구간에서만, 화면 중심 근처에 "지금 화면에 보이는 개수"를 살짝 보여줌 —
-// 클러스터링/필터링 로직과는 완전히 무관한 순수 표시 전용 요소.
-let _aedCountLabel = null;
-function renderAedCountLabel(count, lat, lng){
-  if(_aedCountLabel) _aedCountLabel.setMap(null);
-  _aedCountLabel = new kakao.maps.CustomOverlay({
-    position: new kakao.maps.LatLng(lat, lng),
-    content: `<div style="transform:translateY(-26px);background:rgba(20,20,20,.78);color:#fff;font-size:12px;font-weight:700;padding:3px 9px;border-radius:10px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.3);">이 화면: ${count.toLocaleString()}개</div>`,
-    zIndex: 6, yAnchor: 0.5, xAnchor: 0.5
-  });
-  _aedCountLabel.setMap(map);
-}
 
 
 // ⚠️ 좌표 이상치 감지 — 추가 API 호출 없이 순수 계산만으로 판단함.
