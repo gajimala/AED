@@ -391,7 +391,7 @@
   <select id="regionSelect" onchange="onRegionChange()">
     <option value="all">전체</option>
   </select>
-  <button id="aedToggleBtn" onclick="toggleAedLayer()">🚑 AED 표시</button>
+  <button id="aedToggleBtn" onclick="closeAllOpenSheets();toggleAedLayer()">🚑 AED 표시</button>
 </div>
 <div id="classifyProgress"></div>
 <div id="syncStatus"></div>
@@ -403,7 +403,7 @@
 
 <button id="skyviewEntry" onclick="toggleSkyview()" title="항공뷰(위성사진) 전환">🛰️</button>
 
-<button id="nearestEntry" onclick="openNearestSheet()" title="가까운곳 찾기">가까운곳 찾기</button>
+<button id="nearestEntry" onclick="closeAllOpenSheets();openNearestSheet()" title="가까운곳 찾기">가까운곳 찾기</button>
 
 <!-- 가장 가까운 인명구조함/AED 찾기 -->
 <div class="overlay" id="nearestOverlay">
@@ -424,15 +424,15 @@
 
 <!-- 우측 하단 관리자 진입 아이콘 -->
 <div id="eduBar">
-  <button class="edu-cat-btn cpr" onclick="openEduPanel('cpr')" title="심폐소생술">
+  <button class="edu-cat-btn cpr" onclick="closeAllOpenSheets();openEduPanel('cpr')" title="심폐소생술">
     <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-10-9.2C.5 8.6 2.4 5 6 5c2 0 3.5 1.1 4.3 2.4L12 9.6l1.7-2.2C14.5 6.1 16 5 18 5c3.6 0 5.5 3.6 4 6.8-2.5 4.6-10 9.2-10 9.2z" fill="none" stroke="#E4572E" stroke-width="1.8"/><path d="M4 13h3l1.5-3 2 5 1.5-3H20" fill="none" stroke="#E4572E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span>심폐소생술</span>
   </button>
-  <button class="edu-cat-btn gear" onclick="openEduPanel('gear')" title="구조장비 사용법">
+  <button class="edu-cat-btn gear" onclick="closeAllOpenSheets();openEduPanel('gear')" title="구조장비 사용법">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#0FA3B1" stroke-width="3.4"/><circle cx="12" cy="12" r="2.3" fill="#0FA3B1"/></svg>
     <span>구조장비 사용법</span>
   </button>
-  <button class="edu-cat-btn aed" onclick="openEduPanel('aed')" title="AED 사용법">
+  <button class="edu-cat-btn aed" onclick="closeAllOpenSheets();openEduPanel('aed')" title="AED 사용법">
     <svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="3" fill="none" stroke="#FF6B35" stroke-width="1.8"/><path d="M13 5 8 13h4l-1 6 6-9h-4z" fill="#FF6B35"/></svg>
     <span>AED 사용법</span>
   </button>
@@ -442,7 +442,7 @@
   <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
 </div>
 
-<button id="addReportEntry" onclick="openReportFlow('add')">➕ 새 구조함 제보</button>
+<button id="addReportEntry" onclick="closeAllOpenSheets();openReportFlow('add')">➕ 새 구조함 제보</button>
 
 <!-- 사용자용 마커 상세 시트 -->
 <div class="overlay" id="markerOverlay" onclick="if(event.target===this) closeMarkerSheet();">
@@ -470,7 +470,7 @@
       <div class="row">
         <div>
           <label>사진으로 위치 자동입력 (선택)</label>
-          <input type="file" id="editPhotoInput" accept="image/*" capture="environment" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
+          <input type="file" id="editPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('editLat')" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
           <div id="editPhotoPreview" style="margin-top:6px;"></div>
         </div>
       </div>
@@ -689,7 +689,7 @@
         <div class="row">
           <div>
             <label>사진으로 위치 자동입력 (선택)</label>
-            <input type="file" id="newPhotoInput" accept="image/*" capture="environment" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
+            <input type="file" id="newPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('newLat')" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
             <div id="newPhotoPreview" style="margin-top:6px;"></div>
             <div class="hint" style="margin-top:4px;">사진에 위치정보(GPS)가 있으면 위도/경도가 자동으로 채워집니다. 필수는 아니며, 직접 입력해도 됩니다.</div>
           </div>
@@ -744,7 +744,7 @@
         </div>
         <div style="overflow-x:auto;margin-top:10px;">
           <table class="bulk" id="bulkEditTable">
-            <thead><tr><th>주소</th><th>위도</th><th>경도</th><th>비고</th><th></th></tr></thead>
+            <thead><tr><th>주소</th><th>위도</th><th>경도</th><th>비고</th><th></th><th></th></tr></thead>
             <tbody id="bulkEditBody"></tbody>
           </table>
         </div>
@@ -1096,8 +1096,8 @@ async function initMap(){
   kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) loadAedNationwide(); });
   // 지도를 움직이거나 확대·축소를 시작하면 열려있던 마커 설명창을 자동으로 닫음
   // (닫기 버튼을 굳이 안 눌러도 되게)
-  kakao.maps.event.addListener(map, 'dragstart', ()=>{ closeMarkerSheet(); closeAedInfo(); });
-  kakao.maps.event.addListener(map, 'zoom_start', ()=>{ closeMarkerSheet(); closeAedInfo(); });
+  kakao.maps.event.addListener(map, 'dragstart', ()=>{ closeMarkerSheet(); closeAedInfo(); closeReportSheetIfOpen(); });
+  kakao.maps.event.addListener(map, 'zoom_start', ()=>{ closeMarkerSheet(); closeAedInfo(); closeReportSheetIfOpen(); });
 }
 
 // 우측 상단 버튼으로 언제든 다시 내 위치로 이동(한 번만, 강제 추적 아님)
@@ -2092,6 +2092,13 @@ function copyAedCoord(text){
 function closeAedInfo(){
   document.getElementById('aedInfoBox').classList.remove('show');
 }
+// 다른 주요 화면(버튼)으로 이동할 때, 열려있던 설명창들을 전부 미리 닫아둠
+// ("다른 화면 눌러도 닫혀야 한다"는 요청 — 지도 이동뿐 아니라 버튼 이동에도 적용)
+function closeAllOpenSheets(){
+  closeMarkerSheet();
+  closeAedInfo();
+  closeReportSheetIfOpen();
+}
 
 function openAedDirections(lat, lng, name){
   const url = `https://map.kakao.com/link/to/${encodeURIComponent(name)},${lat},${lng}`;
@@ -2344,6 +2351,11 @@ function closeReportFlow(){
   reportState = { type:'edit', targetId:null, marker:null, photoDataUrl:null, photoGPS:null };
   document.getElementById('reportOverlay').classList.remove('show');
 }
+// 지도 이동 등으로 자동 닫을 때 쓰는 안전한 버전 — 원래 열려있던 상태일 때만 실제로 닫음
+// (안 열려있는데 무작정 호출하면 reportState가 불필요하게 초기화될 수 있어서 방지함)
+function closeReportSheetIfOpen(){
+  if(document.getElementById('reportOverlay').classList.contains('show')) closeReportFlow();
+}
 
 function startReportLocation(){
   const msg = document.getElementById('reportMsg');
@@ -2544,6 +2556,10 @@ async function applyApprovedChange(entry, isCivilianAuto){
     }
     addMarkerToMap(rec);
     if(!isCivilianAuto) entry.targetId = rec.id; // 이후 이력에서 어떤 레코드가 생성됐는지 추적 가능하게
+    // ⚠️ 진짜 버그였던 부분(사용자가 직접 발견함) — 민간인 제보 사진이 승인(자동이든 관리자
+    // 수동이든)돼도, 일반 사용자가 보는 공개 설명창용 사진 저장소로는 한 번도 안 옮겨지고
+    // 있었음(관리자 검토 목록에만 보였음). 이제 승인되는 순간 같이 옮겨서 공개 설명창에도 뜨게 함.
+    if(entry.photoDataUrl) uploadPhotoDataUrl(rec.id, entry.photoDataUrl);
   } else if(entry.type==='delete'){
     const target = markerObjs[entry.targetId];
     if(isCivilianAuto){
@@ -2571,6 +2587,7 @@ async function applyApprovedChange(entry, isCivilianAuto){
       target.record = rec;
       target.marker.setPosition(new kakao.maps.LatLng(entry.newLat, entry.newLng));
       target.marker.setImage(pickLifesaverIcon(rec)); // 색 구별 즉시 반영
+      if(entry.photoDataUrl) uploadPhotoDataUrl(rec.id, entry.photoDataUrl);
     }
   }
   clusterer.redraw();
@@ -2583,6 +2600,58 @@ async function applyApprovedChange(entry, isCivilianAuto){
 // 저장 버튼을 눌러 실제 레코드가 만들어진 뒤에 그 id로 업로드됨(아직 id가 없는 신규입력의
 // 경우 저장 성공 후에 업로드).
 let _adminPhotoDataUrl = { newLat: null, editLat: null }; // 입력창 id 기준으로 임시 보관
+
+// ⚠️ 사진 찍으려고 카메라 앱이 열리는 동안, 폰 운영체제가 메모리를 아끼려고 우리 앱을
+// 강제 종료했다가 다시 켜는 경우가 있음(모바일 브라우저에서 흔한 현상 — 완전히 막을 수는
+// 없음). 그래서 카메라를 열기 "직전"에 지금까지 입력한 내용을 저장해두고, 앱이 다시 켜지면
+// 자동으로 복구해서 입력하던 내용이 사라지지 않게 함.
+function saveAdminFormStateBeforeCamera(latId){
+  const state = { latId, ts: Date.now() };
+  if(latId === 'newLat'){
+    state.panel = 'new';
+    state.lat = document.getElementById('newLat').value;
+    state.lng = document.getElementById('newLng').value;
+    state.addr = document.getElementById('newAddr').value;
+    state.note = document.getElementById('newNote').value;
+  } else {
+    state.panel = 'edit';
+    state.markerId = currentMarkerId;
+    state.lat = document.getElementById('editLat').value;
+    state.lng = document.getElementById('editLng').value;
+    state.addr = document.getElementById('editAddr').value;
+  }
+  try{ sessionStorage.setItem('adminFormStateBeforeCamera', JSON.stringify(state)); }catch(e){}
+}
+
+// 앱이 다시 켜졌을 때(관리자 모드 진입 이후) 호출 — 저장해둔 폼 내용이 있으면 복구함
+function restoreAdminFormStateIfAny(){
+  let raw;
+  try{ raw = sessionStorage.getItem('adminFormStateBeforeCamera'); }catch(e){ return; }
+  if(!raw) return;
+  sessionStorage.removeItem('adminFormStateBeforeCamera');
+  let state;
+  try{ state = JSON.parse(raw); }catch(e){ return; }
+  if(!state || Date.now() - state.ts > 10*60*1000) return; // 10분 넘게 지난 건 복구 안 함(오래된 값 실수로 되살리는 것 방지)
+
+  if(state.panel === 'new'){
+    switchTab('add'); // 신규입력 탭으로 전환
+    document.getElementById('newLat').value = state.lat || '';
+    document.getElementById('newLng').value = state.lng || '';
+    document.getElementById('newAddr').value = state.addr || '';
+    document.getElementById('newNote').value = state.note || '';
+    if(state.lat && state.lng) onNewLatLngTyped();
+    const msg = document.getElementById('newMsg');
+    if(msg){ msg.textContent = '사진 촬영 중 화면이 새로고침되어, 입력하던 내용을 복구했습니다.'; msg.className='msg ok'; msg.style.display='block'; }
+  } else if(state.panel === 'edit' && state.markerId && markerObjs[state.markerId]){
+    openMarkerSheet(state.markerId);
+    startEditCoord();
+    document.getElementById('editLat').value = state.lat || '';
+    document.getElementById('editLng').value = state.lng || '';
+    document.getElementById('editAddr').value = state.addr || '';
+    const msg = document.getElementById('markerMsg');
+    if(msg){ msg.textContent = '사진 촬영 중 화면이 새로고침되어, 입력하던 내용을 복구했습니다.'; msg.className='msg ok'; msg.style.display='block'; }
+  }
+}
 
 function handleAdminPhotoCapture(file, latId, lngId, previewId){
   if(!file) return;
@@ -2627,15 +2696,21 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
 
 // 저장이 실제로 성공한 뒤, 그 레코드 id로 방금 찍은 사진을 업로드함(실패해도 구조함 등록/수정
 // 자체는 이미 끝난 상태이므로 조용히 무시 — 사진은 부가 기능일 뿐 핵심 저장을 막으면 안 됨).
-async function uploadAdminPhotoIfAny(id, latId){
-  const photoDataUrl = _adminPhotoDataUrl[latId];
-  if(!photoDataUrl) return;
+// 실제로 사진을 공개 저장소에 올리는 공통 함수 — 관리자 직접입력이든, 민간인 제보가
+// 승인됐을 때든 똑같이 이 함수를 씀. 실패해도 조용히 넘어감(사진은 부가 기능일 뿐,
+// 핵심인 구조함 등록/수정 자체를 막으면 안 되므로).
+async function uploadPhotoDataUrl(id, photoDataUrl){
   try{
     await fetch(`${WORKER_URL}/lifesaver-photo/${id}`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ photoDataUrl })
     });
   }catch(e){ console.warn('사진 업로드 실패(구조함 저장 자체는 정상 완료됨):', e); }
+}
+async function uploadAdminPhotoIfAny(id, latId){
+  const photoDataUrl = _adminPhotoDataUrl[latId];
+  if(!photoDataUrl) return;
+  await uploadPhotoDataUrl(id, photoDataUrl);
   _adminPhotoDataUrl[latId] = null;
 }
 
@@ -2772,7 +2847,7 @@ const aedSteps = [
   {img:'./icon/Edu/aed2.jpg', badge:'2단계', title:'패드 부착 (맨 가슴에)', desc:'오른쪽 빗장뼈 아래와 왼쪽 가슴 아래 옆구리에 단단히 붙입니다. 여성도 브래지어를 벗길 필요 없이 위치만 조정해 부착하면 됩니다(2025년 지침).'},
   {img:'./icon/Edu/aed3.jpg', badge:'3단계', title:'심전도 분석 중 — 접촉 금지', desc:'"분석 중입니다" 안내가 나오면 아무도 환자 몸에 닿지 않아야 합니다.'},
   {img:'./icon/Edu/aed4.jpg', badge:'4단계', title:'필요시 제세동(충격) 버튼', desc:'"제세동이 필요합니다" 안내가 나오면, 모두 환자에게서 떨어졌는지 확인한 뒤 깜빡이는 버튼을 누릅니다.'},
-  {img:'./icon/Edu/aed5.jpg', badge:'5단계', title:'즉시 가슴압박 재개', desc:'충격 후 곧바로 가슴압박을 다시 시작합니다. AED는 2분마다 자동으로 재분석합니다.'},
+  {img:'./icon/Edu/aed5.jpg', badge:'5단계', title:'즉시 가슴압박 재개', desc:'충격을 주었든 안 주었든 곧바로 가슴압박을 다시 시작합니다. AED는 2분마다 자동으로 재분석합니다.'},
 ];
 
 function makeStepViewer(steps, panelId, prevId, nextId, opts){
@@ -3382,6 +3457,8 @@ function finishEnterAdminMode(){
   document.getElementById('addReportEntry').style.display = 'none';
   openAdminDash();
   classifyMissingRegions(); // 관리자가 들어왔을 때만 남은 주소/행정구역 백그라운드 분류 진행
+  restoreAdminFormStateIfAny(); // 사진 찍다가 화면이 새로고침돼서 다시 로그인한 경우, 입력하던 내용 복구
+  restoreBulkTableStateIfAny(); // 대량입력/대량수정 표에서 사진 찍다가 재시작된 경우도 복구
 }
 function logoutAdmin(){
   isAdmin = false;
@@ -3815,6 +3892,81 @@ async function addSingle(){
 }
 
 /* ---------------- 대량입력 ---------------- */
+// ⚠️ 대량입력(붙여넣기/엑셀) 미리보기 — 예전엔 "N건 등록 예정"이라는 요약 문구 하나에
+// 등록 버튼만 있어서, 줄 하나하나를 확인·수정하거나 사진으로 위치를 찍을 방법이 없었음.
+// 이제 대량수정 표와 똑같은 구조(각 줄이 입력칸+카메라 버튼+삭제 버튼이 있는 행)로 보여줘서,
+// 등록 전에 직접 검토·수정하거나 사진으로 위치를 채울 수 있게 함.
+function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extraOnDone){
+  const preview = document.getElementById(previewElId);
+  const msg = document.getElementById(msgElId);
+  if(!parsed.length){ preview.innerHTML=''; return; }
+
+  preview.innerHTML = `
+    <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">${parsed.length}건 — 아래에서 확인·수정 후 등록하세요</div>
+    <table class="bulk" style="margin-top:8px;">
+      <thead><tr><th>주소</th><th>위도</th><th>경도</th><th>비고</th><th></th><th></th></tr></thead>
+      <tbody id="${previewElId}_body">
+        ${parsed.map(r=>`
+          <tr data-id="${r.id}">
+            <td><input type="text" class="bn-addr" value="${(r.addr||'').replace(/"/g,'&quot;')}"></td>
+            <td><input type="text" class="bn-lat" value="${r.lat}" style="width:100px;"></td>
+            <td><input type="text" class="bn-lng" value="${r.lng}" style="width:100px;"></td>
+            <td><input type="text" class="bn-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
+            <td style="text-align:center;">
+              <label style="cursor:pointer;font-size:16px;" title="사진으로 이 줄 위치 자동입력">
+                📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
+              </label>
+            </td>
+            <td class="del" onclick="this.closest('tr').remove()">🗑</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    <button class="btn btn-orange" style="margin-top:10px;" id="${previewElId}_confirmBtn">전체 등록하기</button>
+  `;
+
+  document.getElementById(previewElId+'_confirmBtn').onclick = async ()=>{
+    // 등록 직전에 표에 지금 보이는(수정됐을 수도, 지워졌을 수도 있는) 값을 그대로 다시 읽음
+    const rows = document.querySelectorAll(`#${previewElId}_body tr`);
+    const toSave = []; let formatErrors = 0;
+    rows.forEach(tr=>{
+      const lat = parseFloat(tr.querySelector('.bn-lat').value);
+      const lng = parseFloat(tr.querySelector('.bn-lng').value);
+      if(isNaN(lat) || isNaN(lng)){ formatErrors++; return; }
+      toSave.push({
+        id: tr.dataset.id, lat, lng,
+        addr: tr.querySelector('.bn-addr').value.trim(),
+        note: tr.querySelector('.bn-note').value.trim(),
+        lastEditSource: 'admin'
+      });
+    });
+    if(!toSave.length){ msg.textContent='등록할 항목이 없습니다.'; msg.className='msg err'; msg.style.display='block'; return; }
+
+    const markerRefs = toSave.map(rec => addMarkerToMap(rec)); // 지도에는 먼저 다 보여줌(반응성)
+    msg.textContent = `${toSave.length}건 저장 중…`; msg.className='msg'; msg.style.display='block';
+    const results = await Promise.allSettled(toSave.map(rec => upsertRecord(rec)));
+    let failCount = 0;
+    results.forEach((r, idx)=>{
+      if(r.status==='rejected'){
+        failCount++;
+        const ref = markerRefs[idx];
+        if(ref && ref.marker) clusterer.removeMarker(ref.marker);
+        if(ref && ref.id) delete markerObjs[ref.id];
+      }
+    });
+    classifyMissingRegions();
+    if(toSave.length>0) logAdminChange('add', null, `${toSave.length}건`, null, null, null, null, `관리자 대량입력(${logLabel}) — ${toSave.length}건 등록`);
+    if(failCount===0){
+      msg.textContent = `${toSave.length}건 등록 완료! 지도에 즉시 반영되었습니다.${formatErrors? ` (${formatErrors}건은 좌표 오류로 제외)`:''}`; msg.className='msg ok';
+    } else {
+      msg.textContent = `${toSave.length}건 중 ${failCount}건 저장 실패로 지도에서 제외했습니다. 나머지 ${toSave.length-failCount}건은 정상 등록되었습니다.`; msg.className='msg err';
+    }
+    preview.innerHTML='';
+    buildBulkEditTable();
+    if(extraOnDone) extraOnDone();
+  };
+}
+
 function parseBulkNew(){
   const text = document.getElementById('bulkNewArea').value.trim();
   const msg = document.getElementById('bulkNewMsg');
@@ -3834,43 +3986,13 @@ function parseBulkNew(){
   });
 
   if(errors.length){
-    msg.textContent = `${errors.length}줄 형식 오류 (줄 번호: ${errors.join(', ')}) — 해당 줄을 제외한 ${parsed.length}건만 등록됩니다.`;
+    msg.textContent = `${errors.length}줄 형식 오류 (줄 번호: ${errors.join(', ')}) — 해당 줄을 제외한 ${parsed.length}건만 표에 나타납니다.`;
     msg.className='msg err'; msg.style.display='block';
   } else {
     msg.textContent = `${parsed.length}건 확인 완료.`; msg.className='msg ok'; msg.style.display='block';
   }
 
-  preview.innerHTML = `
-    <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">${parsed.length}건 등록 예정</div>
-    <button class="btn btn-orange" style="margin-top:8px;" id="confirmBulkBtn">전체 등록하기</button>
-  `;
-  document.getElementById('confirmBulkBtn').onclick = async ()=>{
-    const markerRefs = parsed.map(rec => { rec.lastEditSource='admin'; return addMarkerToMap(rec); }); // 지도에는 먼저 다 보여줌(반응성)
-    msg.textContent = `${parsed.length}건 저장 중…`; msg.className='msg';
-    // ⚠️ 예전엔 저장 결과를 기다리지 않고 바로 "등록 완료"라고 표시했음 — 대량입력은 특히
-    // 여러 건 중 일부만 실패할 수 있어서, 전부 끝날 때까지 기다린 뒤 정확한 성공/실패 건수를
-    // 알려주는 게 중요함. allSettled를 써서 일부가 실패해도 나머지 결과를 놓치지 않게 함.
-    const results = await Promise.allSettled(parsed.map(rec => upsertRecord(rec)));
-    let failCount = 0;
-    results.forEach((r, idx)=>{
-      if(r.status==='rejected'){
-        failCount++;
-        const ref = markerRefs[idx];
-        if(ref && ref.marker) clusterer.removeMarker(ref.marker); // 실패한 것만 정확히 골라 지도에서도 지움
-        if(ref && ref.id) delete markerObjs[ref.id];
-      }
-    });
-    classifyMissingRegions();
-    if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(붙여넣기) — ${parsed.length}건 등록`);
-    if(failCount===0){
-      msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
-    } else {
-      msg.textContent = `${parsed.length}건 중 ${failCount}건 저장 실패로 지도에서 제외했습니다. 나머지 ${parsed.length-failCount}건은 정상 등록되었습니다.`; msg.className='msg err';
-    }
-    document.getElementById('bulkNewArea').value='';
-    preview.innerHTML='';
-    buildBulkEditTable();
-  };
+  renderBulkNewPreviewTable(parsed, 'bulkPreview', 'bulkNewMsg', '붙여넣기', ()=>{ document.getElementById('bulkNewArea').value=''; });
 }
 
 /* ---------------- 엑셀 열 이름 인식 ---------------- */
@@ -3943,32 +4065,7 @@ function parseBulkNewExcel(evt){
     }
     msg.textContent = `${parsed.length}건 인식됨${errCount? `, ${errCount}행은 좌표 오류로 제외`:''}`;
     msg.className='msg ok'; msg.style.display='block';
-    preview.innerHTML = `<button class="btn btn-orange" style="margin-top:10px;" id="confirmExcelBtn">${parsed.length}건 전체 등록하기</button>`;
-    document.getElementById('confirmExcelBtn').onclick = async ()=>{
-      const markerRefs = parsed.map(rec => { rec.lastEditSource='admin'; return addMarkerToMap(rec); }); // 지도에는 먼저 다 보여줌(반응성)
-      msg.textContent = `${parsed.length}건 저장 중…`; msg.className='msg';
-      const results = await Promise.allSettled(parsed.map(rec => upsertRecord(rec)));
-      // ⚠️ 예전엔 실패 건수만 문구로 알려주고, 실패한 마커는 지도에 그대로 남아있었음 — 메시지랑
-      // 실제 화면이 서로 다른 얘기를 하는 상태였음. 실패한 것만 정확히 골라 지도에서도 지움.
-      let failCount = 0;
-      results.forEach((r, idx)=>{
-        if(r.status==='rejected'){
-          failCount++;
-          const ref = markerRefs[idx];
-          if(ref && ref.marker) clusterer.removeMarker(ref.marker);
-          if(ref && ref.id) delete markerObjs[ref.id];
-        }
-      });
-      classifyMissingRegions();
-      if(parsed.length>0) logAdminChange('add', null, `${parsed.length}건`, null, null, null, null, `관리자 대량입력(엑셀) — ${parsed.length}건 등록`);
-      if(failCount===0){
-        msg.textContent = `${parsed.length}건 등록 완료! 지도에 즉시 반영되었습니다.`; msg.className='msg ok';
-      } else {
-        msg.textContent = `${parsed.length}건 중 ${failCount}건 저장 실패로 지도에서 제외했습니다. 나머지 ${parsed.length-failCount}건은 정상 등록되었습니다.`; msg.className='msg err';
-      }
-      preview.innerHTML=''; evt.target.value='';
-      buildBulkEditTable();
-    };
+    renderBulkNewPreviewTable(parsed, 'bulkFilePreview', 'bulkNewFileMsg', '엑셀', ()=>{ evt.target.value=''; });
   });
 }
 
@@ -4210,6 +4307,11 @@ function renderMoreBulkRows(){
       <td><input type="text" class="be-lat" value="${r.lat}" style="width:100px;"></td>
       <td><input type="text" class="be-lng" value="${r.lng}" style="width:100px;"></td>
       <td><input type="text" class="be-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
+      <td style="text-align:center;">
+        <label style="cursor:pointer;font-size:16px;" title="사진으로 이 줄 위치 자동입력">
+          📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
+        </label>
+      </td>
       <td class="del" onclick="quickDelete('${r.id}')">🗑</td>
     </tr>
   `).join(''));
@@ -4221,6 +4323,90 @@ function renderMoreBulkRows(){
   moreBox.innerHTML = remain > 0
     ? `<button class="btn btn-ghost btn-sm" onclick="renderMoreBulkRows()">${remain}건 더 보기</button>`
     : (bulkFilteredList.length===0 ? `<span style="font-size:12.5px;color:var(--ink-soft);">검색 결과 없음</span>` : '');
+}
+
+// 대량수정 표에서, 한 줄(행)의 카메라 아이콘을 눌러 사진을 찍으면 그 줄의 위도/경도만
+// 자동으로 채워줌(신규입력/좌표수정과 같은 GPS 추출 로직 재사용). 필수 아니고 보조 수단.
+// 대량수정 표(.be-*)와 대량입력 미리보기 표(.bn-*) 둘 다에서 쓰는 공통 함수 —
+// ⚠️ 진짜 버그였던 부분(재검증 중 발견) — 원래 .be-lat/.be-lng만 찾도록 짜여있어서,
+// 대량입력 미리보기 표(.bn-lat/.bn-lng를 씀)에서는 카메라 버튼을 눌러도 아무 반응이 없었음.
+// 이제 두 표 어느 쪽이든 실제로 있는 입력칸을 찾아서 채우도록 고침.
+function handleBulkRowPhotoCapture(inputEl, rowEl){
+  const file = inputEl.files[0];
+  if(!file || !rowEl) return;
+  // ⚠️ 카메라 앱이 열리는 동안 앱이 재시작될 수 있어서(운영체제 메모리 관리), 지금 이 표에
+  // 있는 모든 줄의 내용을 미리 저장해둠 — 재시작되면 관리자 로그인 후 자동으로 복구됨.
+  saveBulkTableStateBeforeCamera(rowEl);
+
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const gps = parseExifGPS(e.target.result);
+    const latInput = rowEl.querySelector('.be-lat, .bn-lat');
+    const lngInput = rowEl.querySelector('.be-lng, .bn-lng');
+    if(gps && latInput && lngInput){
+      latInput.value = gps.lat.toFixed(6);
+      lngInput.value = gps.lng.toFixed(6);
+      rowEl.style.background = '#EAF7EE'; // 잠깐 초록빛으로 반짝여서 반영됐음을 알림
+      setTimeout(()=>{ rowEl.style.background = ''; }, 1200);
+    } else if(!gps){
+      alert('사진에서 위치정보(GPS)를 찾지 못했습니다.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// 대량수정/대량입력 표에서 카메라 열기 직전, 지금 표에 있는 모든 줄의 값을 저장해둠
+function saveBulkTableStateBeforeCamera(rowEl){
+  const table = rowEl.closest('table');
+  if(!table) return;
+  const isBulkEdit = !!table.querySelector('.be-lat');
+  const prefix = isBulkEdit ? 'be' : 'bn';
+  const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => ({
+    id: tr.dataset.id,
+    addr: tr.querySelector(`.${prefix}-addr`)?.value || '',
+    lat: tr.querySelector(`.${prefix}-lat`)?.value || '',
+    lng: tr.querySelector(`.${prefix}-lng`)?.value || '',
+    note: tr.querySelector(`.${prefix}-note`)?.value || ''
+  }));
+  const previewElId = isBulkEdit ? null : table.closest('[id$="Preview"]')?.id;
+  try{
+    sessionStorage.setItem('bulkTableStateBeforeCamera', JSON.stringify({
+      kind: isBulkEdit ? 'edit' : 'new', previewElId, rows, ts: Date.now()
+    }));
+  }catch(e){}
+}
+
+// 앱이 다시 켜졌을 때(관리자 모드 진입 이후) 대량입력/대량수정 표 내용을 복구함
+function restoreBulkTableStateIfAny(){
+  let raw;
+  try{ raw = sessionStorage.getItem('bulkTableStateBeforeCamera'); }catch(e){ return; }
+  if(!raw) return;
+  sessionStorage.removeItem('bulkTableStateBeforeCamera');
+  let state;
+  try{ state = JSON.parse(raw); }catch(e){ return; }
+  if(!state || Date.now() - state.ts > 10*60*1000 || !state.rows?.length) return; // 10분 넘으면 복구 안 함
+
+  if(state.kind === 'edit'){
+    switchTab('bulkEdit');
+    // 서버에서 다시 불러온 목록에, 저장해뒀던 값(수정 중이던 내용)을 덮어씌워서 표에 그대로 반영
+    setTimeout(()=>{
+      state.rows.forEach(r=>{
+        const tr = document.querySelector(`#bulkEditBody tr[data-id="${r.id}"]`);
+        if(tr){
+          tr.querySelector('.be-addr').value = r.addr;
+          tr.querySelector('.be-lat').value = r.lat;
+          tr.querySelector('.be-lng').value = r.lng;
+          tr.querySelector('.be-note').value = r.note;
+        }
+      });
+      alert('사진 촬영 중 화면이 새로고침되어, 대량수정 표에 입력하던 내용을 복구했습니다.');
+    }, 300); // 표가 먼저 그려질 시간을 살짝 줌
+  } else if(state.kind === 'new' && state.previewElId){
+    switchTab('bulkNew');
+    const msgElId = state.previewElId === 'bulkPreview' ? 'bulkNewMsg' : 'bulkNewFileMsg';
+    renderBulkNewPreviewTable(state.rows.map(r=>({...r, lat:parseFloat(r.lat), lng:parseFloat(r.lng)})), state.previewElId, msgElId, '복구됨');
+    alert('사진 촬영 중 화면이 새로고침되어, 대량입력 표에 입력하던 내용을 복구했습니다.');
+  }
 }
 
 async function quickDelete(id){
