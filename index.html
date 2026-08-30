@@ -1087,10 +1087,16 @@ async function initMap(){
   startMyLocationTracking();
 
   // AED는 기본적으로 항상 켜진 상태로 시작 — 버튼은 이제 껐다 켜는 토글 용도.
-  // 지도가 최종 위치(GPS 또는 기본값)로 자리잡은 뒤에 조회해야 엉뚱한 지역으로 조회되지 않음.
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 예전엔 GPS로 지도 중심을 옮긴 "직후" 바로
+  // loadAedNationwide()를 호출했는데, 카카오맵이 새 위치 기준으로 화면 범위(bounds)를 완전히
+  // 재계산하기 전이라 잘못된 범위로 조회되는 경우가 있었음(그래서 화면을 터치해서 지도가
+  // 다시 한 번 움직여야만 정상적으로 떴던 것). 그렇다고 idle 이벤트에만 의존하면, 혹시
+  // 프로그래밍적으로 중심을 옮겼을 때 idle이 자동으로 안 터지는 경우엔 아예 안 뜰 위험도
+  // 있음 — 그래서 약간의 지연(지도가 안정될 시간)을 준 뒤 명시적으로도 한 번 불러오는
+  // 이중 안전장치로 만듦.
   aedState.on = true;
   document.getElementById('aedToggleBtn').classList.add('on');
-  loadAedNationwide();
+  setTimeout(()=>{ if(aedState.on) loadAedNationwide(); }, 400);
 
   // AED를 켜둔 상태에서 지도를 움직이거나 확대/축소하면, 멈췄을 때(idle) 그 위치 기준으로 다시 조회
   kakao.maps.event.addListener(map, 'idle', ()=>{ if(aedState.on) loadAedNationwide(); });
