@@ -708,6 +708,12 @@
         <div id="bulkFilePreview"></div>
       </div>
       <div class="card">
+        <div class="hint"><b>표에서 바로 입력하기</b>: 붙여넣기나 파일 업로드 없이, 빈 표에서 한 줄씩 추가하며 입력할 수 있습니다. 사진으로 위치를 바로 채울 수 있어요.</div>
+        <div class="msg" id="bulkDirectMsg"></div>
+        <div id="bulkDirectPreview"></div>
+        <button class="btn btn-ghost" style="margin-top:10px;" onclick="addBulkDirectRow()">➕ 줄 추가</button>
+      </div>
+      <div class="card">
         <div class="hint"><b>직접 붙여넣기</b>: 한 줄에 하나씩, <b>위도,경도,주소</b> (쉼표 구분)<br>예) 37.791666,128.922927,강동면 안인진리 159-60</div>
         <div class="msg" id="bulkNewMsg"></div>
         <textarea id="bulkNewArea" placeholder="37.791666,128.922927,강동면 안인진리 159-60
@@ -3902,6 +3908,21 @@ async function addSingle(){
 // 등록 버튼만 있어서, 줄 하나하나를 확인·수정하거나 사진으로 위치를 찍을 방법이 없었음.
 // 이제 대량수정 표와 똑같은 구조(각 줄이 입력칸+카메라 버튼+삭제 버튼이 있는 행)로 보여줘서,
 // 등록 전에 직접 검토·수정하거나 사진으로 위치를 채울 수 있게 함.
+// "표에서 바로 입력하기" — 붙여넣기/엑셀 없이, 빈 표에서 줄을 하나씩 추가하며 입력.
+// 이미 표에 입력해둔 내용(있다면)은 그대로 유지한 채, 새 빈 줄만 하나 추가함.
+function addBulkDirectRow(){
+  const body = document.getElementById('bulkDirectPreview_body');
+  const current = body ? Array.from(body.querySelectorAll('tr')).map(tr => ({
+    id: tr.dataset.id,
+    addr: tr.querySelector('.bn-addr')?.value || '',
+    lat: parseFloat(tr.querySelector('.bn-lat')?.value) || 0,
+    lng: parseFloat(tr.querySelector('.bn-lng')?.value) || 0,
+    note: tr.querySelector('.bn-note')?.value || ''
+  })) : [];
+  current.push({ id: newId(), lat: '', lng: '', addr: '', note: '' });
+  renderBulkNewPreviewTable(current, 'bulkDirectPreview', 'bulkDirectMsg', '표 직접입력');
+}
+
 function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extraOnDone){
   const preview = document.getElementById(previewElId);
   const msg = document.getElementById(msgElId);
