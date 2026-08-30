@@ -701,17 +701,17 @@
     <!-- 대량입력 -->
     <div class="panel" id="panel-bulkNew">
       <div class="card">
+        <div class="hint"><b>표에서 바로 입력하기</b>: 붙여넣기나 파일 업로드 없이, 빈 표에서 한 줄씩 추가하며 입력할 수 있습니다. 사진으로 위치를 바로 채울 수 있어요.</div>
+        <div class="msg" id="bulkDirectMsg"></div>
+        <div id="bulkDirectPreview"></div>
+        <button class="btn btn-ghost" style="margin-top:10px;" onclick="addBulkDirectRow()">➕ 줄 추가</button>
+      </div>
+      <div class="card">
         <div class="hint"><b>엑셀 업로드</b>: 첫 행은 머리글로 취급됩니다. 열 이름은 <b>위도, 경도, 주소, 비고</b> (또는 lat, lng, addr, note) 중 하나로 인식합니다.</div>
         <button class="btn btn-ghost btn-sm" style="margin-bottom:10px;" onclick="downloadBulkNewTemplate()">📄 엑셀 양식 다운로드</button>
         <input type="file" id="bulkNewFile" accept=".xlsx,.xls,.csv" onchange="parseBulkNewExcel(event)">
         <div class="msg" id="bulkNewFileMsg"></div>
         <div id="bulkFilePreview"></div>
-      </div>
-      <div class="card">
-        <div class="hint"><b>표에서 바로 입력하기</b>: 붙여넣기나 파일 업로드 없이, 빈 표에서 한 줄씩 추가하며 입력할 수 있습니다. 사진으로 위치를 바로 채울 수 있어요.</div>
-        <div class="msg" id="bulkDirectMsg"></div>
-        <div id="bulkDirectPreview"></div>
-        <button class="btn btn-ghost" style="margin-top:10px;" onclick="addBulkDirectRow()">➕ 줄 추가</button>
       </div>
       <div class="card">
         <div class="hint"><b>직접 붙여넣기</b>: 한 줄에 하나씩, <b>위도,경도,주소</b> (쉼표 구분)<br>예) 37.791666,128.922927,강동면 안인진리 159-60</div>
