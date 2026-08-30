@@ -470,6 +470,8 @@
       <div class="row">
         <div>
           <label>사진으로 위치 자동입력 (선택)</label>
+          <input type="file" id="editPhotoInputCam" accept="image/*" capture="environment" style="display:none;" onclick="saveAdminFormStateBeforeCamera('editLat')" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('editPhotoInputCam').click()">📸 바로 촬영</button>
           <input type="file" id="editPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('editLat')" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
           <div id="editPhotoPreview" style="margin-top:6px;"></div>
         </div>
@@ -689,6 +691,8 @@
         <div class="row">
           <div>
             <label>사진으로 위치 자동입력 (선택)</label>
+            <input type="file" id="newPhotoInputCam" accept="image/*" capture="environment" style="display:none;" onclick="saveAdminFormStateBeforeCamera('newLat')" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('newPhotoInputCam').click()">📸 바로 촬영</button>
             <input type="file" id="newPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('newLat')" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
             <div id="newPhotoPreview" style="margin-top:6px;"></div>
             <div class="hint" style="margin-top:4px;">사진에 위치정보(GPS)가 있으면 위도/경도가 자동으로 채워집니다. 필수는 아니며, 직접 입력해도 됩니다.</div>
@@ -3939,8 +3943,11 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
             <td><input type="text" class="bn-lat" value="${r.lat}" style="width:100px;"></td>
             <td><input type="text" class="bn-lng" value="${r.lng}" style="width:100px;"></td>
             <td><input type="text" class="bn-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
-            <td style="text-align:center;">
-              <label style="cursor:pointer;font-size:16px;" title="사진으로 이 줄 위치 자동입력">
+            <td style="text-align:center;white-space:nowrap;">
+              <label style="cursor:pointer;font-size:16px;" title="바로 촬영">
+                📸<input type="file" accept="image/*" capture="environment" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
+              </label>
+              <label style="cursor:pointer;font-size:16px;margin-left:4px;" title="사진 선택(카메라/앨범)">
                 📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
               </label>
             </td>
@@ -4334,8 +4341,11 @@ function renderMoreBulkRows(){
       <td><input type="text" class="be-lat" value="${r.lat}" style="width:100px;"></td>
       <td><input type="text" class="be-lng" value="${r.lng}" style="width:100px;"></td>
       <td><input type="text" class="be-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
-      <td style="text-align:center;">
-        <label style="cursor:pointer;font-size:16px;" title="사진으로 이 줄 위치 자동입력">
+      <td style="text-align:center;white-space:nowrap;">
+        <label style="cursor:pointer;font-size:16px;" title="바로 촬영">
+          📸<input type="file" accept="image/*" capture="environment" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
+        </label>
+        <label style="cursor:pointer;font-size:16px;margin-left:4px;" title="사진 선택(카메라/앨범)">
           📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
         </label>
       </td>
