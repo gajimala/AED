@@ -3586,19 +3586,31 @@ function createBackupNow(){
 
 // AED 지역별 요약(aed_summary.json)을 지금 저장된 데이터 기준으로 즉시 재계산 — 자동 갱신이
 // 빠져있는 동안(CPU 절약을 위해 제거됨) 숫자가 오래돼 보일 때 수동으로 새로고침하는 용도
-function recomputeAedSummaryNow(){
+async function recomputeAedSummaryNow(){
   const msg = document.getElementById('recomputeSummaryMsg');
-  msg.textContent = '재계산 중… (지역이 많아 다소 시간이 걸릴 수 있습니다)'; msg.className='msg ok'; msg.style.display='block';
-  fetch(`${WORKER_URL}/recompute-aed-summary`, { method:'POST', headers:{ 'X-Admin-Code': ADMIN_CODE } })
-    .then(async res=>{
+  msg.textContent = '재계산 중… (0단계)'; msg.className='msg ok'; msg.style.display='block';
+
+  // ⚠️ 요청 수 제한(워커 1회 실행당 50개)에 걸려서, 서버가 한 번에 다 못 끝내고 "아직 남음"을
+  // 돌려줄 수 있음 — 그러면 자동으로 이어서 계속 호출함(사람이 여러 번 누를 필요 없음).
+  let step = 0;
+  try{
+    while(true){
+      step++;
+      const res = await fetch(`${WORKER_URL}/recompute-aed-summary`, { method:'POST', headers:{ 'X-Admin-Code': ADMIN_CODE } });
       if(!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      aedSummaryData = null; // 캐시된 요약 데이터를 지워서 다음 조회 때 새로 받아오게 함
-      msg.textContent = '✅ 요약 재계산 완료. 지도에서 다시 확인해보세요.'; msg.className='msg ok'; msg.style.display='block';
-    })
-    .catch(e=>{
-      console.error('요약 재계산 실패', e);
-      msg.textContent = '재계산 실패: ' + e.message; msg.className='msg err'; msg.style.display='block';
-    });
+      const r = await res.json();
+      if(r.done){
+        aedSummaryData = null; // 캐시된 요약 데이터를 지워서 다음 조회 때 새로 받아오게 함
+        msg.textContent = `✅ 요약 재계산 완료(${step}단계에 걸쳐 처리됨). 지도에서 다시 확인해보세요.`; msg.className='msg ok'; msg.style.display='block';
+        break;
+      } else {
+        msg.textContent = `재계산 중… (${step}단계 완료, 남은 시/도 ${r.remaining}개)`; msg.className='msg ok'; msg.style.display='block';
+      }
+    }
+  }catch(e){
+    console.error('요약 재계산 실패', e);
+    msg.textContent = '재계산 실패: ' + e.message; msg.className='msg err'; msg.style.display='block';
+  }
 }
 
 function restoreBackup(name, label){
