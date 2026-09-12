@@ -826,6 +826,11 @@
         <div class="msg" id="backupMsg"></div>
         <div id="backupList" style="margin-top:14px;"></div>
       </div>
+      <div class="card">
+        <div class="hint">AED 지역별 뱃지 숫자(<b>aed_summary.json</b>)는 CPU 절약을 위해 더 이상 자동으로 갱신되지 않습니다. 지역별 개수가 실제와 다르게 보이면, 아래 버튼으로 지금 저장된 데이터 기준으로 즉시 다시 계산할 수 있습니다.</div>
+        <button class="btn btn-orange" onclick="recomputeAedSummaryNow()">🔄 AED 요약 지금 다시 계산하기</button>
+        <div class="msg" id="recomputeSummaryMsg"></div>
+      </div>
     </div>
 
   </div>
@@ -1703,9 +1708,17 @@ function getVisibleWidthKm(){
 // 다시 버벅였음(실제 테스트로 확인됨). 그래서 500m부터는 다시 "서버가 미리 계산해둔"
 // 구/시군/도 단위로 되돌림 — 이러면 그때그때 계산할 필요 없이 미리 만들어둔 숫자만 읽으면
 // 되므로 훨씬 가벼움. 개별 마커(+카카오 실시간 클러스터링)는 500m 미만에서만 사용함.
-const AED_TIER_INDIVIDUAL_MAX_KM = 0.25; // 250m까지만 개별(카카오가 자동으로 화면 기준 묶음)
-const AED_TIER_GU_MAX_KM = 2;            // 250m~2km: 구 단위(은평구, 서대문구 등 — 가장 세밀한 사전계산 단위)
-const AED_TIER_PROVINCE_MAX_KM = 16;     // 16km부터: 도(道) 단위로 전환(특별시/광역시는 자기 자신 유지)
+// ⚠️ 정확한 5단계로 재조정(요청받은 정확한 기준) —
+//   ~100m: 무조건 개별(개수 상관없이, 30개 규칙도 적용 안 함)
+//   100m~250m: 개별 + 카카오 자체 클러스터러(30개 넘으면 자동 묶음)
+//   250m~500m: 구 단위 뱃지
+//   500m~16km: 시/군/구 단위 뱃지(각 시군구청 위치 기준 — sigungu_office_coords.json 참고)
+//   16km~: 도/특별시광역시 단위
+const AED_TIER_ALWAYS_INDIVIDUAL_KM = 0.1; // 100m까지는 무조건 개별(30개 규칙조차 적용 안 함)
+const AED_TIER_INDIVIDUAL_MAX_KM = 0.25;   // 250m까지는 개별(100m~250m 구간엔 30개 규칙 적용)
+const AED_TIER_GU_MAX_KM = 0.5;            // 250m~500m: 구 단위
+const AED_TIER_SIGUNGU_MAX_KM = 16;        // 500m~16km: 시/군/구 단위(시군구청 좌표 기준)
+const AED_TIER_PROVINCE_MAX_KM = 16;       // 16km부터: 도(道) 단위로 전환(특별시/광역시는 자기 자신 유지)
                                           // ⚠️ 특별시/광역시(세종 포함)는 도가 아니므로, 16km 넘어도 "도 단위"로 합쳐지지 않고
                                           // 계속 자기 자신(도시 단위)만 표시함 — 합쳐질 상위 단위 자체가 없음.
 
@@ -1769,11 +1782,12 @@ function renderAedInViewport(){
   if(!items.length) return;
   closeAedInfo();
   prepareOverlapCheckCache();
-  // ⚠️ 요청받은 규칙 — 거리(축척) 기준 대신 "화면에 몇 개 있는지" 개수로 판단함.
-  // 30개 이하면 전부 개별 아이콘으로, 30개를 넘으면 카카오 자체 클러스터러가 묶어서 보여줌.
-  // minLevel을 그때그때 바꿔서 이 규칙을 구현함(30개 이하일 땐 클러스터링 자체를 꺼버림).
+  // ⚠️ 정확한 규칙 재조정(요청받음) — 100m 이하는 개수 상관없이 무조건 개별(클러스터링
+  // 자체를 아예 끔). 100m~250m 구간에서만 "화면에 30개 넘으면 카카오 자체 클러스터러로
+  // 묶는다"는 규칙을 적용함. minLevel을 그때그때 바꿔서 구현함.
   if(aedClusterer.setMinLevel){
-    aedClusterer.setMinLevel(items.length > 30 ? 1 : 20);
+    const shouldCluster = widthKm > AED_TIER_ALWAYS_INDIVIDUAL_KM && items.length > 30;
+    aedClusterer.setMinLevel(shouldCluster ? 1 : 20);
   }
   items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item));
 }
@@ -3564,6 +3578,23 @@ function createBackupNow(){
       console.error('백업 생성 실패', e);
       // ⚠️ 예전엔 뭉뚱그린 문구만 보여줘서 진짜 원인을 알 수가 없었음 — 실제 서버 응답을 그대로 보여줌
       msg.textContent = '백업 생성 실패: ' + e.message; msg.className='msg err'; msg.style.display='block';
+    });
+}
+
+// AED 지역별 요약(aed_summary.json)을 지금 저장된 데이터 기준으로 즉시 재계산 — 자동 갱신이
+// 빠져있는 동안(CPU 절약을 위해 제거됨) 숫자가 오래돼 보일 때 수동으로 새로고침하는 용도
+function recomputeAedSummaryNow(){
+  const msg = document.getElementById('recomputeSummaryMsg');
+  msg.textContent = '재계산 중… (지역이 많아 다소 시간이 걸릴 수 있습니다)'; msg.className='msg ok'; msg.style.display='block';
+  fetch(`${WORKER_URL}/recompute-aed-summary`, { method:'POST', headers:{ 'X-Admin-Code': ADMIN_CODE } })
+    .then(async res=>{
+      if(!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      aedSummaryData = null; // 캐시된 요약 데이터를 지워서 다음 조회 때 새로 받아오게 함
+      msg.textContent = '✅ 요약 재계산 완료. 지도에서 다시 확인해보세요.'; msg.className='msg ok'; msg.style.display='block';
+    })
+    .catch(e=>{
+      console.error('요약 재계산 실패', e);
+      msg.textContent = '재계산 실패: ' + e.message; msg.className='msg err'; msg.style.display='block';
     });
 }
 
