@@ -1842,7 +1842,13 @@ async function renderAedSummaryMode(generation){
   const METRO_SIDO = new Set([
     '서울특별시','부산광역시','대구광역시','인천광역시','광주광역시','대전광역시','울산광역시','세종특별자치시'
   ]);
+  // ⚠️ 세종은 다른 광역시와 달리 "구"가 없고 "동"(다정동, 보람동 등) 단위라서, 구 단위
+  // 뱃지 구간에서 동 이름들이 각자 따로 인식돼 1,1,3,7,10처럼 작은 숫자로 잘게 흩어져
+  // 보기 어려워지는 문제가 있었음(사용자가 발견함). 세종은 지리적으로도 작아서, 중간
+  // 단계 없이 250m를 벗어나면 바로 "세종특별자치시 전체" 뱃지로 넘어가게 함.
+  const NO_DISTRICT_METRO_SIDO = new Set(['세종특별자치시']);
   function isProvinceTier(sido){
+    if (NO_DISTRICT_METRO_SIDO.has(sido)) return widthKm >= AED_TIER_INDIVIDUAL_MAX_KM;
     const threshold = METRO_SIDO.has(sido) ? AED_TIER_METRO_MAX_KM : AED_TIER_PROVINCE_MAX_KM;
     return widthKm >= threshold;
   }
