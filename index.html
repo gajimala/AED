@@ -1752,7 +1752,20 @@ function renderAedInViewport(){
   const myGeneration = _aedRenderGeneration;
   const widthKm = getVisibleWidthKm();
 
-  if(widthKm >= AED_TIER_INDIVIDUAL_MAX_KM){
+  // ⚠️ 세종은 "구"가 없어서(동 단위만 있음), 250m~500m 구간에서 뱃지를 보여주려 하면
+  // 동 이름들이 잘게 흩어져 이상한 작은 숫자들로 보이는 문제가 있었음(사용자가 발견함).
+  // 세종은 지리적으로 작아서, 좌표 범위로 "지금 세종을 보고 있는지"를 간단히 판단해서,
+  // 이 구간에서는 뱃지 대신 개별+카카오 자동 클러스터러를 그대로 이어서 쓰게 함.
+  const SEJONG_BOUNDS = { latMin: 36.42, latMax: 36.62, lngMin: 127.20, lngMax: 127.38 };
+  function isViewingSejong(){
+    const c = map.getCenter();
+    const lat = c.getLat(), lng = c.getLng();
+    return lat >= SEJONG_BOUNDS.latMin && lat <= SEJONG_BOUNDS.latMax
+        && lng >= SEJONG_BOUNDS.lngMin && lng <= SEJONG_BOUNDS.lngMax;
+  }
+  const extendIndividualForSejong = widthKm < AED_TIER_GU_MAX_KM && isViewingSejong();
+
+  if(widthKm >= AED_TIER_INDIVIDUAL_MAX_KM && !extendIndividualForSejong){
     renderAedSummaryMode(myGeneration);
     return;
   }
@@ -1789,14 +1802,13 @@ function renderAedInViewport(){
   if(!items.length) return;
   closeAedInfo();
   prepareOverlapCheckCache();
-  // ⚠️ 정확한 규칙 재조정(요청받음) — 100m 이하는 개수 상관없이 무조건 개별(클러스터링
-  // 자체를 아예 끔). 100m~250m 구간에서만 "화면에 30개 넘으면 카카오 자체 클러스터러로
-  // 묶는다"는 규칙을 적용함. minLevel을 그때그때 바꿔서 구현함.
-  if(aedClusterer.setMinLevel){
-    const shouldCluster = widthKm > AED_TIER_ALWAYS_INDIVIDUAL_KM && items.length > 30;
-    aedClusterer.setMinLevel(shouldCluster ? 1 : 20);
-  }
-  items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item));
+  // ⚠️ 정확한 규칙(요청받음) — 100m 이하는 개수 상관없이 무조건 개별. 100m~250m 구간에서만
+  // "화면에 30개 넘으면 묶는다"는 규칙을 적용함. 예전엔 setMinLevel을 동적으로 바꿔서
+  // 구현하려 했는데 이 방식이 처음부터 전혀 작동을 안 했음(사용자가 확인함) — 대신 각
+  // 마커를 클러스터러에 넣을지 말지를 직접 결정하는 훨씬 확실한 방식으로 바꿈.
+  const useCluster = widthKm > AED_TIER_ALWAYS_INDIVIDUAL_KM && items.length > 30;
+  if(aedClusterer && !useCluster) aedClusterer.clear(); // 클러스터러를 안 쓰는 화면이면 혹시 남아있을 클러스터러 표시를 확실히 비움
+  items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item, useCluster));
 }
 
 // 지도 중심 위경도(+여유분) 안에 대표 좌표가 있는 시/군/구만 골라서, 개별 마커 대신
@@ -2030,7 +2042,7 @@ const AED_ICON_GRAY = () => new kakao.maps.MarkerImage(
   ), new kakao.maps.Size(30,30), { offset: new kakao.maps.Point(15,15) }
 );
 
-function renderAedMarker(a){
+function renderAedMarker(a, useCluster){
   const pos = avoidOverlapPosition(a.lat, a.lng);
   // 운영시간 정보가 있고, 지금이 그 시간대가 아니면(available===false) 흑백 아이콘.
   // 운영시간 정보가 아예 없으면(available===null) 굳이 막지 말고 활성(컬러) 상태로 표시.
@@ -2043,7 +2055,16 @@ function renderAedMarker(a){
   });
   kakao.maps.event.addListener(marker, 'click', ()=>showAedInfo(a));
   aedState.markers.push(marker);
-  if(aedClusterer) aedClusterer.addMarker(marker); else marker.setMap(map); // 클러스터러 준비 전 안전장치
+  // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 "처음부터 한 번도 적용된 적 없다"고 확인) —
+  // aedClusterer.setMinLevel()을 그때그때 동적으로 바꿔서 "30개 넘으면 묶기"를 구현하려
+  // 했는데, 이 방식 자체가 신뢰할 수 없었던 것으로 보임. 대신 "이번 화면은 클러스터러를
+  // 쓸지 말지"를 직접 매개변수로 받아서, 안 쓸 땐 클러스터러를 아예 거치지 않고 지도에
+  // 바로 마커를 놓는 훨씬 직접적인 방식으로 바꿈.
+  if(useCluster && aedClusterer){
+    aedClusterer.addMarker(marker);
+  } else {
+    marker.setMap(map);
+  }
 }
 
 // 구조함(또는 다른 AED)과 5m 이내로 겹치면 살짝 옆으로 밀어서 둘 다 보이고 둘 다 클릭되게 함
