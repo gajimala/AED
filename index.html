@@ -2442,6 +2442,8 @@ const REPORT_COPY = {
 
 function openReportFlow(type){
   reportState = { type, targetId: (type==='add' ? null : currentMarkerId), marker:null, photoDataUrl:null, photoGPS:null };
+  const submitBtn = document.getElementById('reportSubmitBtn');
+  if(submitBtn){ submitBtn.dataset.submitting = 'false'; } // 새 제보 시작 시 이전 제출 잠금 상태 초기화
   const copy = REPORT_COPY[type];
   document.getElementById('reportTitle').textContent = copy.title;
   document.getElementById('reportHint').innerHTML = copy.hint;
@@ -2580,9 +2582,21 @@ function updateReportSubmitState(){
 }
 
 async function submitReport(){
+  // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — 제출 버튼을 누르는 동안 잠그는
+  // 장치가 없어서, 모바일에서 터치가 중복 인식되면(더블탭) 이 함수가 두 번 실행됨. 첫
+  // 번째 실행이 끝나기도 전에 두 번째가 시작되면, 이력이 중복으로 남거나 reportState가
+  // 꼬여서 수정요청이 신규등록으로 잘못 처리되는 문제가 있었던 것으로 보임. 제출 시작하는
+  // 즉시 잠가서 같은 제보가 두 번 처리되는 일을 원천 차단함.
+  const submitBtn = document.getElementById('reportSubmitBtn');
+  if(submitBtn && submitBtn.dataset.submitting === 'true') return;
+  if(submitBtn){ submitBtn.dataset.submitting = 'true'; submitBtn.disabled = true; }
+
   const type = reportState.type;
   const reason = document.getElementById('reportReason').value.trim();
-  if(!reportState.marker || !reportState.photoDataUrl || !reason) return;
+  if(!reportState.marker || !reportState.photoDataUrl || !reason){
+    if(submitBtn){ submitBtn.dataset.submitting = 'false'; submitBtn.disabled = false; }
+    return;
+  }
 
   const p = reportState.marker.getPosition();
   const proposedLat = p.getLat(), proposedLng = p.getLng();
