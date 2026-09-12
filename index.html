@@ -379,7 +379,7 @@
   <div class="ring"></div>
   <h1>인명구조함 지도</h1>
   <p>카카오맵 불러오는 중…</p>
-  <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작: 안전하세요</div>
+  <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작: 이환수</div>
 </div>
 
 <!-- 지도 -->
@@ -1548,6 +1548,32 @@ function clearAedMarkers(){
 // 보완은 되는데 뱃지 숫자엔 반영이 안 되던 것을 고침).
 let _aedLiveFallbackCounts = {}; // { 시도이름: 실제로 받아온 개수 }
 
+// ⚠️ 서버 저장 구조를 시/도 단위 큰 파일에서 시/군 단위 작은 파일들로 바꾸는 중(대용량
+// 파싱으로 인한 서버 CPU 초과 문제 해결을 위함). 전환 기간 동안 두 구조가 섞여 있을 수
+// 있으므로, 새 구조(색인+시/군 파일들)를 먼저 시도하고, 없으면 예전 구조(시/도 파일 하나)로
+// 자동 대체함 — 어느 쪽이든 화면엔 항상 정상적으로 표시되도록 안전장치를 둠.
+async function fetchSidoAedData(sido){
+  try{
+    const indexRes = await fetch(`./aed/${encodeURIComponent(sido)}/_index.json`);
+    if(indexRes.ok){
+      const sigunguNames = await indexRes.json();
+      if(Array.isArray(sigunguNames) && sigunguNames.length){
+        const parts = await Promise.allSettled(
+          sigunguNames.map(sg => fetch(`./aed/${encodeURIComponent(sido)}/${encodeURIComponent(sg)}.json`).then(r => r.ok ? r.json() : []))
+        );
+        let combined = [];
+        parts.forEach(p => { if(p.status === 'fulfilled' && Array.isArray(p.value)) combined = combined.concat(p.value); });
+        return combined;
+      }
+    }
+  }catch(e){ /* 새 구조 조회 실패 — 아래 예전 방식으로 자동 대체 */ }
+
+  try{
+    const res = await fetch(`./aed/${encodeURIComponent(sido)}.json`);
+    return res.ok ? await res.json() : [];
+  }catch(e){ return []; }
+}
+
 async function loadAedNationwide(){
   const relevant = getRelevantSidoForViewport();
   const toFetch = relevant.filter(s => !_aedLoadedSido.has(s));
@@ -1555,7 +1581,7 @@ async function loadAedNationwide(){
     setAedInfoMsg('AED 정보를 불러오는 중…');
     const summary = await loadAedSummary(); // ⚠️ "이 지역엔 원래 몇 개 있어야 하는지" 기준값으로 씀(아래에서 비교)
     const results = await Promise.allSettled(
-      toFetch.map(sido => fetch(`./aed/${encodeURIComponent(sido)}.json`).then(r => r.ok ? r.json() : []))
+      toFetch.map(sido => fetchSidoAedData(sido))
     );
     // ⚠️ 캐시 보완용 — 예전엔 "10건 미만이면 부실"이라는 고정 기준을 썼는데, 대구처럼
     // "16건이나 있지만 원래 수천 건이어야 하는" 경우를 못 잡아냈음(실제로 발견된 문제).
@@ -1625,7 +1651,7 @@ async function loadAedNear(lat, lng){
   const toFetch = relevant.filter(s => !_aedLoadedSido.has(s));
   if(!toFetch.length) return;
   const results = await Promise.allSettled(
-    toFetch.map(sido => fetch(`./aed/${encodeURIComponent(sido)}.json`).then(r => r.ok ? r.json() : []))
+    toFetch.map(sido => fetchSidoAedData(sido))
   );
   results.forEach((r, i) => {
     _aedLoadedSido.add(toFetch[i]);
