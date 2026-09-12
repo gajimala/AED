@@ -1531,6 +1531,11 @@ function setAedInfoMsg(html){
 
 function clearAedMarkers(){
   if(aedClusterer) aedClusterer.clear();
+  // ⚠️ 진짜 버그였던 부분(방금 발견) — 클러스터러 없이 지도에 직접 놓은 마커(useCluster=false
+  // 경우)는 aedClusterer.clear()로는 안 지워짐. aedState.markers를 비우기 전에 각 마커를
+  // 직접 setMap(null)해서 확실히 지도에서 없애야, 축소했을 때 개별 마커가 남아있다가
+  // 뱃지랑 겹쳐 보이는 문제가 안 생김.
+  aedState.markers.forEach(m=>{ try{ m.setMap(null); }catch(e){} });
   aedState.markers = [];
   // ⚠️ 진짜 버그였던 부분 — 지역 요약 뱃지(_aedSummaryMarkers)는 안 지워서, AED를 껐다 켜면
   // 예전 뱃지가 화면에 그대로 남아있다가 새 걸로 겹쳐 보이는 문제가 있었음(사용자가 발견함).
@@ -1716,7 +1721,13 @@ function getVisibleWidthKm(){
 //   250m~500m: 구 단위 뱃지
 //   500m~16km: 시/군/구 단위 뱃지(각 시군구청 위치 기준 — sigungu_office_coords.json 참고)
 //   16km~: 도/특별시광역시 단위
-const AED_TIER_ALWAYS_INDIVIDUAL_KM = 0.1; // 100m까지는 무조건 개별(30개 규칙조차 적용 안 함)
+// ⚠️ 진짜 원인이었음(전수 재검토로 발견) — 카카오 레벨 5(100m)와 레벨 6(250m) 사이엔
+// 중간 단계가 전혀 없음. "100m 초과 250m 미만"에서만 30개 규칙을 적용하려 했는데, 그
+// 조건을 만족하는 레벨 자체가 존재하지 않아 30개 규칙 구간이 원천적으로 도달 불가능했음
+// (레벨5=100m는 "무조건개별" 기준과 같아서 규칙 미적용, 레벨6=250m는 이미 요약모드로
+// 넘어가버림). 기준을 레벨4(50m)로 한 칸 낮춰서, 레벨5(100m)가 실제로 30개 규칙이
+// 적용되는 도달 가능한 구간이 되게 함.
+const AED_TIER_ALWAYS_INDIVIDUAL_KM = 0.05; // 50m까지만 무조건 개별, 100m(레벨5)부터 30개 규칙 적용 가능
 const AED_TIER_INDIVIDUAL_MAX_KM = 0.25;   // 250m까지는 개별(100m~250m 구간엔 30개 규칙 적용)
 const AED_TIER_GU_MAX_KM = 0.5;            // 250m~500m: 구 단위
 const AED_TIER_SIGUNGU_MAX_KM = 16;        // 500m~16km: 시/군/구 단위(시군구청 좌표 기준)
@@ -1807,8 +1818,16 @@ function renderAedInViewport(){
   // 구현하려 했는데 이 방식이 처음부터 전혀 작동을 안 했음(사용자가 확인함) — 대신 각
   // 마커를 클러스터러에 넣을지 말지를 직접 결정하는 훨씬 확실한 방식으로 바꿈.
   const useCluster = widthKm > AED_TIER_ALWAYS_INDIVIDUAL_KM && items.length > 30;
-  if(aedClusterer && !useCluster) aedClusterer.clear(); // 클러스터러를 안 쓰는 화면이면 혹시 남아있을 클러스터러 표시를 확실히 비움
-  items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).forEach(item=>renderAedMarker(item, useCluster));
+  if(aedClusterer) aedClusterer.clear(); // 이번 화면 기준으로 항상 새로 시작(이전 상태가 남아 헷갈리지 않게)
+  const markers = items.filter(item => !isHiddenBadCoord(item.lat, item.lng)).map(item=>renderAedMarker(item));
+  // ⚠️ 진짜 원인이었을 가능성이 높음 — 마커를 addMarker()로 하나씩 넣으면 카카오 클러스터러가
+  // 제대로 재계산을 안 하는 경우가 있었던 것으로 보임(사용자가 "30개 규칙이 처음부터 전혀
+  // 작동한 적 없다"고 확인). addMarkers()로 한 번에 일괄로 넣는 방식으로 바꿈.
+  if(useCluster && aedClusterer){
+    aedClusterer.addMarkers(markers);
+  } else {
+    markers.forEach(m=>m.setMap(map));
+  }
 }
 
 // 지도 중심 위경도(+여유분) 안에 대표 좌표가 있는 시/군/구만 골라서, 개별 마커 대신
@@ -2042,7 +2061,7 @@ const AED_ICON_GRAY = () => new kakao.maps.MarkerImage(
   ), new kakao.maps.Size(30,30), { offset: new kakao.maps.Point(15,15) }
 );
 
-function renderAedMarker(a, useCluster){
+function renderAedMarker(a){
   const pos = avoidOverlapPosition(a.lat, a.lng);
   // 운영시간 정보가 있고, 지금이 그 시간대가 아니면(available===false) 흑백 아이콘.
   // 운영시간 정보가 아예 없으면(available===null) 굳이 막지 말고 활성(컬러) 상태로 표시.
@@ -2050,21 +2069,12 @@ function renderAedMarker(a, useCluster){
   const icon = (status.available === false) ? AED_ICON_GRAY() : AED_ICON();
   const marker = new kakao.maps.Marker({
     position: new kakao.maps.LatLng(pos.lat, pos.lng), image: icon, zIndex: 15
-    // ⚠️ map을 여기서 직접 지정하지 않음 — 클러스터러가 addMarker로 관리해야 축소 시
-    // 숫자 뱃지로 묶여서 표시됨(예전엔 여기서 map을 바로 지정해서 클러스터링이 전혀 안 됐음)
+    // ⚠️ map을 여기서 지정 안 함 — 호출한 쪽에서 클러스터러에 일괄로 넣거나 직접 지도에
+    // 놓거나 결정함(아래 renderAedInViewport 참고)
   });
   kakao.maps.event.addListener(marker, 'click', ()=>showAedInfo(a));
   aedState.markers.push(marker);
-  // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 "처음부터 한 번도 적용된 적 없다"고 확인) —
-  // aedClusterer.setMinLevel()을 그때그때 동적으로 바꿔서 "30개 넘으면 묶기"를 구현하려
-  // 했는데, 이 방식 자체가 신뢰할 수 없었던 것으로 보임. 대신 "이번 화면은 클러스터러를
-  // 쓸지 말지"를 직접 매개변수로 받아서, 안 쓸 땐 클러스터러를 아예 거치지 않고 지도에
-  // 바로 마커를 놓는 훨씬 직접적인 방식으로 바꿈.
-  if(useCluster && aedClusterer){
-    aedClusterer.addMarker(marker);
-  } else {
-    marker.setMap(map);
-  }
+  return marker;
 }
 
 // 구조함(또는 다른 AED)과 5m 이내로 겹치면 살짝 옆으로 밀어서 둘 다 보이고 둘 다 클릭되게 함
