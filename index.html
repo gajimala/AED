@@ -872,6 +872,28 @@ function loadRecords(){ return _cache || []; }
 
 // 화면 반응은 즉시(낙관적 갱신), 실제 저장은 Worker를 거쳐 GitHub에 커밋됨.
 // 저장 실패 시(네트워크 문제, Worker 미배포 등) 사용자에게 바로 알림.
+// ⚠️ 대량입력/대량수정에서 진짜 문제였던 부분 — 3,000건처럼 많은 양을 Promise.allSettled로
+// 한꺼번에(병렬로) 저장하려 하면, 전부 같은 파일(lifesavers.json) 하나를 동시에 고치려고
+// 몰려들어서 GitHub이 "다른 요청이 먼저 고쳤다"며 계속 충돌(409)을 일으킴(실제 로그로
+// 확인된 문제). 워커 쪽에 재시도 로직(4번)이 있지만, 수백~수천 건이 동시에 몰리면 그마저도
+// 부족할 수 있음. 한 번에 하나씩만 순서대로 저장하도록 바꿔서, 애초에 충돌이 거의 안
+// 생기게 함(느리지만 훨씬 안전 — 관리자 작업이라 실시간 응답이 중요하지 않으므로 적절함).
+async function saveRecordsSequentially(items, saveFn, onProgress){
+  const results = [];
+  for(let i=0; i<items.length; i++){
+    try{
+      await saveFn(items[i]);
+      results.push({ status: 'fulfilled' });
+    }catch(e){
+      results.push({ status: 'rejected', reason: e });
+    }
+    if(onProgress && (i % 20 === 0 || i === items.length-1)){
+      onProgress(i+1, items.length);
+    }
+  }
+  return results;
+}
+
 async function upsertRecord(rec){
   const before = loadRecords(); // ⚠️ 실패 시 되돌리기 위해 저장 전 상태를 기억해둠
   const list = [...before];
@@ -4096,7 +4118,9 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
 
     const markerRefs = toSave.map(rec => addMarkerToMap(rec)); // 지도에는 먼저 다 보여줌(반응성)
     msg.textContent = `${toSave.length}건 저장 중…`; msg.className='msg'; msg.style.display='block';
-    const results = await Promise.allSettled(toSave.map(rec => upsertRecord(rec)));
+    const results = await saveRecordsSequentially(toSave, upsertRecord, (done, total)=>{
+      msg.textContent = `저장 중… (${done}/${total})`; msg.className='msg'; msg.style.display='block';
+    });
     let failCount = 0;
     results.forEach((r, idx)=>{
       if(r.status==='rejected'){
@@ -4597,8 +4621,11 @@ async function saveBulkEdit(){
 
   // ⚠️ 진짜 버그였던 부분(전수 재검토 중 발견) — 예전엔 저장 결과를 하나도 안 기다려서,
   // 여러 건 중 일부가 실제로 실패해도 전부 "저장 완료"로 표시되고 이력에도 그렇게 남았음.
-  // allSettled로 전부 끝날 때까지 기다린 뒤, 실제 성공한 건만 화면·이력에 반영함.
-  const results = await Promise.allSettled(toSave.map(rec => upsertRecord(rec)));
+  // 게다가 전부 병렬로 한꺼번에 보내면 같은 파일을 동시에 고치려다 충돌(409)이 잦았음
+  // (실제 로그로 확인됨) — 순서대로 하나씩 저장하도록 바꿔서 충돌 자체를 줄임.
+  const results = await saveRecordsSequentially(toSave, upsertRecord, (done, total)=>{
+    if(btn) btn.textContent = `저장 중… (${done}/${total})`;
+  });
   let updated = 0, saveErrors = 0;
   results.forEach((r, i) => {
     const rec = toSave[i];
