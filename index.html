@@ -1718,7 +1718,8 @@ const AED_TIER_ALWAYS_INDIVIDUAL_KM = 0.1; // 100m까지는 무조건 개별(30�
 const AED_TIER_INDIVIDUAL_MAX_KM = 0.25;   // 250m까지는 개별(100m~250m 구간엔 30개 규칙 적용)
 const AED_TIER_GU_MAX_KM = 0.5;            // 250m~500m: 구 단위
 const AED_TIER_SIGUNGU_MAX_KM = 16;        // 500m~16km: 시/군/구 단위(시군구청 좌표 기준)
-const AED_TIER_PROVINCE_MAX_KM = 16;       // 16km부터: 도(道) 단위로 전환(특별시/광역시는 자기 자신 유지)
+const AED_TIER_METRO_MAX_KM = 8;           // 광역시/특별시는 8km부터 도시 전체로 통합
+const AED_TIER_PROVINCE_MAX_KM = 16;       // 도(道)는 16km부터 도 전체로 통합
                                           // ⚠️ 특별시/광역시(세종 포함)는 도가 아니므로, 16km 넘어도 "도 단위"로 합쳐지지 않고
                                           // 계속 자기 자신(도시 단위)만 표시함 — 합쳐질 상위 단위 자체가 없음.
 
@@ -1832,8 +1833,12 @@ async function renderAedSummaryMode(generation){
   // ⚠️ 정정(사용자가 발견함) — 광역시/특별시도 16km 이상에서만 도시 전체(도 단위와 같은
   // 시점)로 뭉쳐야 함. 예전엔 500m부터 일찍 뭉치게 되어있었는데, 요청받은 5단계 기준상
   // 500m~16km 구간은 광역시/특별시도 계속 구 단위를 유지해야 함(자기 자신 통합은 16km부터).
+  const METRO_SIDO = new Set([
+    '서울특별시','부산광역시','대구광역시','인천광역시','광주광역시','대전광역시','울산광역시','세종특별자치시'
+  ]);
   function isProvinceTier(sido){
-    return widthKm >= AED_TIER_PROVINCE_MAX_KM;
+    const threshold = METRO_SIDO.has(sido) ? AED_TIER_METRO_MAX_KM : AED_TIER_PROVINCE_MAX_KM;
+    return widthKm >= threshold;
   }
 
   let badgeList = [];
