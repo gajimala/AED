@@ -1827,15 +1827,13 @@ async function renderAedSummaryMode(generation){
   // ⚠️ "전남광주통합특별시"는 예전 좁은 광주광역시와 달리, 전라남도 전체 크기의 넓은 지역이
   // 됐으므로(2026.7 통합) 이 목록에서 뺌 — 좁은 도시처럼 8km에서 뭉치면 너무 이르고,
   // 다른 도(道)처럼 16km에서 뭉치는 게 실제 면적에 맞음.
-  const COMPACT_METRO_SIDO = new Set([
-    '서울특별시','부산광역시','대구광역시','인천광역시','광주광역시','대전광역시','울산광역시','세종특별자치시'
-  ]);
-
   // 이 시/도(sido)가 지금 화면 폭 기준으로 "시/도 단위(가장 뭉친 상태)"로 보여줄 때인지 판단.
   // 특별시/광역시는 2km부터, 도(道)는 16km부터 이 단계에 들어감.
+  // ⚠️ 정정(사용자가 발견함) — 광역시/특별시도 16km 이상에서만 도시 전체(도 단위와 같은
+  // 시점)로 뭉쳐야 함. 예전엔 500m부터 일찍 뭉치게 되어있었는데, 요청받은 5단계 기준상
+  // 500m~16km 구간은 광역시/특별시도 계속 구 단위를 유지해야 함(자기 자신 통합은 16km부터).
   function isProvinceTier(sido){
-    const threshold = COMPACT_METRO_SIDO.has(sido) ? AED_TIER_GU_MAX_KM : AED_TIER_PROVINCE_MAX_KM;
-    return widthKm >= threshold;
+    return widthKm > AED_TIER_PROVINCE_MAX_KM;
   }
 
   let badgeList = [];
@@ -1852,7 +1850,7 @@ async function renderAedSummaryMode(generation){
 
     // 아직 시/도 단위까지는 아님 — 시/군 단위로 보여줌 (더 세밀한 구 단위는 이제 카카오
     // 자체 클러스터러(250m~2km 구간)가 담당하므로, 여기서는 항상 시/군 단위만 씀)
-    const showSigunguTier = widthKm >= AED_TIER_GU_MAX_KM;
+    const showSigunguTier = widthKm > AED_TIER_GU_MAX_KM;
     Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
       if(PSEUDO_DISTRICT_LABELS.has(sg)) return;
       const s = summary[sido].sigungu[sg];
