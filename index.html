@@ -1833,7 +1833,7 @@ async function renderAedSummaryMode(generation){
   // 시점)로 뭉쳐야 함. 예전엔 500m부터 일찍 뭉치게 되어있었는데, 요청받은 5단계 기준상
   // 500m~16km 구간은 광역시/특별시도 계속 구 단위를 유지해야 함(자기 자신 통합은 16km부터).
   function isProvinceTier(sido){
-    return widthKm > AED_TIER_PROVINCE_MAX_KM;
+    return widthKm >= AED_TIER_PROVINCE_MAX_KM;
   }
 
   let badgeList = [];
@@ -1850,7 +1850,7 @@ async function renderAedSummaryMode(generation){
 
     // 아직 시/도 단위까지는 아님 — 시/군 단위로 보여줌 (더 세밀한 구 단위는 이제 카카오
     // 자체 클러스터러(250m~2km 구간)가 담당하므로, 여기서는 항상 시/군 단위만 씀)
-    const showSigunguTier = widthKm > AED_TIER_GU_MAX_KM;
+    const showSigunguTier = widthKm >= AED_TIER_GU_MAX_KM;
     Object.keys(summary[sido].sigungu||{}).forEach(sg=>{
       if(PSEUDO_DISTRICT_LABELS.has(sg)) return;
       const s = summary[sido].sigungu[sg];
