@@ -471,6 +471,7 @@
         <div>
           <label>사진으로 위치 자동입력 (선택)</label>
           <input type="file" id="editPhotoInputCam" accept="image/*" capture="environment" style="display:none;" onclick="saveAdminFormStateBeforeCamera('editLat')" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
+          <button type="button" class="btn btn-navy btn-sm" onclick="useCurrentLocationDirect('editLat','editLng',this)">📍 현재 위치로 채우기(카메라 안 씀)</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('editPhotoInputCam').click()">📸 바로 촬영</button>
           <input type="file" id="editPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('editLat')" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
           <div id="editPhotoPreview" style="margin-top:6px;"></div>
@@ -692,6 +693,7 @@
           <div>
             <label>사진으로 위치 자동입력 (선택)</label>
             <input type="file" id="newPhotoInputCam" accept="image/*" capture="environment" style="display:none;" onclick="saveAdminFormStateBeforeCamera('newLat')" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
+            <button type="button" class="btn btn-navy btn-sm" onclick="useCurrentLocationDirect('newLat','newLng',this)">📍 현재 위치로 채우기(카메라 안 씀)</button>
             <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('newPhotoInputCam').click()">📸 바로 촬영</button>
             <input type="file" id="newPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('newLat')" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
             <div id="newPhotoPreview" style="margin-top:6px;"></div>
@@ -2775,15 +2777,32 @@ function saveAdminFormStateBeforeCamera(latId){
     state.lng = document.getElementById('editLng').value;
     state.addr = document.getElementById('editAddr').value;
   }
-  try{ sessionStorage.setItem('adminFormStateBeforeCamera', JSON.stringify(state)); }catch(e){}
+  try{ localStorage.setItem('adminFormStateBeforeCamera', JSON.stringify(state)); }catch(e){}
+
+  // ⚠️ 요청받은 개선 — 카메라를 열면 폰 운영체제가 메모리 확보를 위해 우리 앱을 강제
+  // 종료시킬 수 있는데, 그 확률은 "우리 앱이 지금 메모리를 얼마나 쓰고 있는지"에 크게
+  // 좌우됨. 이 앱에서 제일 큰 메모리를 차지하는 건 전국 AED 데이터(누적하면 6만 건 이상,
+  // 지울 일이 없어서 계속 쌓이기만 함) — 카메라를 열기 직전에 이걸 비워서 메모리를 최대한
+  // 확보함. AED 데이터는 지도로 돌아왔을 때 화면에 보이는 만큼만 다시 자동으로 받아오도록
+  // 이미 설계되어 있어서(온디맨드 로딩), 비워도 기능상 문제는 없음 — 재시작 확률을 낮추기
+  // 위한 조치일 뿐, 100% 방지를 보장하지는 않음(운영체제 동작이라 완전한 통제는 불가능).
+  try{
+    if(typeof aedState !== 'undefined'){ aedState.allItems = []; }
+    if(typeof _aedLoadedSido !== 'undefined'){ _aedLoadedSido.clear(); }
+    if(typeof aedClusterer !== 'undefined' && aedClusterer) aedClusterer.clear();
+    if(typeof _aedSummaryMarkers !== 'undefined' && _aedSummaryMarkers.length){
+      _aedSummaryMarkers.forEach(m=>m.setMap(null));
+      _aedSummaryMarkers = [];
+    }
+  }catch(e){ console.warn('카메라 전 메모리 정리 실패(치명적이지 않음):', e); }
 }
 
 // 앱이 다시 켜졌을 때(관리자 모드 진입 이후) 호출 — 저장해둔 폼 내용이 있으면 복구함
 function restoreAdminFormStateIfAny(){
   let raw;
-  try{ raw = sessionStorage.getItem('adminFormStateBeforeCamera'); }catch(e){ return; }
+  try{ raw = localStorage.getItem('adminFormStateBeforeCamera'); }catch(e){ return; }
   if(!raw) return;
-  sessionStorage.removeItem('adminFormStateBeforeCamera');
+  localStorage.removeItem('adminFormStateBeforeCamera');
   let state;
   try{ state = JSON.parse(raw); }catch(e){ return; }
   if(!state || Date.now() - state.ts > 10*60*1000) return; // 10분 넘게 지난 건 복구 안 함(오래된 값 실수로 되살리는 것 방지)
@@ -2810,10 +2829,41 @@ function restoreAdminFormStateIfAny(){
 
 let _adminPhotoReadyPromise = { newLat: null, editLat: null }; // 썸네일 생성이 끝났는지 기다릴 수 있는 약속(Promise)
 
+// ⚠️ 카메라를 아예 안 열고, 폰의 GPS로 "지금 여기 위치"를 바로 물어봄 — 카메라 앱을 열면
+// 운영체제가 메모리 확보를 위해 앱을 통째로 재시작시키는 문제를 원천적으로 피할 수 있음
+// (사진을 안 거치니까 애초에 배경으로 밀려날 일이 없음). 관리자가 현장에서 직접 등록할
+// 때, 사진 없이 좌표만 빠르게 채우고 싶을 때 씀.
+function useCurrentLocationDirect(latId, lngId, btn){
+  if(!navigator.geolocation){ alert('이 기기에서 위치 기능을 지원하지 않습니다.'); return; }
+  const latInput = document.getElementById(latId), lngInput = document.getElementById(lngId);
+  const originalText = btn ? btn.textContent : '';
+  if(btn){ btn.textContent = '위치 확인 중…'; btn.disabled = true; }
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      latInput.value = pos.coords.latitude.toFixed(6);
+      lngInput.value = pos.coords.longitude.toFixed(6);
+      if(latId === 'newLat') onNewLatLngTyped(); // 신규입력 화면은 지도 위 아이콘도 같이 옮김
+      if(btn){ btn.textContent = originalText; btn.disabled = false; }
+    },
+    (err)=>{
+      alert('현재 위치를 가져오지 못했습니다: ' + err.message);
+      if(btn){ btn.textContent = originalText; btn.disabled = false; }
+    },
+    { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
+  );
+}
+
 function handleAdminPhotoCapture(file, latId, lngId, previewId){
   if(!file) return;
   const preview = document.getElementById(previewId);
-  preview.innerHTML = '<div class="hint">사진 처리 중…</div>';
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 썸네일(사진 미리보기)과 GPS 배지가 같은
+  // preview 칸의 innerHTML을 각자 통째로 덮어쓰고 있었음. GPS 추출이 먼저 끝나서 배지를
+  // 띄워도, 그 뒤에 썸네일 생성이 끝나면서 preview.innerHTML을 통째로 새로 써버려서 방금
+  // 뜬 배지가 사라져버렸음(좌표 자체는 입력칸에 정상적으로 들어갔지만, 확인 메시지만
+  // 사라져서 "안 된 것처럼" 보였던 것). 서로 다른 하위 칸을 각각 따로 써서 겹치지 않게 함.
+  preview.innerHTML = '<div class="hint" id="'+previewId+'_thumb">사진 처리 중…</div><div id="'+previewId+'_badge"></div>';
+  const thumbEl = document.getElementById(previewId+'_thumb');
+  const badgeContainer = document.getElementById(previewId+'_badge');
 
   // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — GPS 좌표 추출(아래 2번, 빠름)과
   // 썸네일 생성(아래 1번, 사진 디코딩 필요해서 더 오래 걸림)이 각각 별도로 비동기 처리됨.
@@ -2833,7 +2883,7 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
     canvas.height = imgEl.height * scale;
     canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
     _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
-    preview.innerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
+    if(thumbEl) thumbEl.outerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
     URL.revokeObjectURL(imgUrl);
     resolve();
   };
@@ -2856,7 +2906,7 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
       badge.className = 'gps-badge warn';
       badge.textContent = '⚠️ 사진에서 위치정보를 찾지 못했습니다 — 위도/경도를 직접 입력해주세요';
     }
-    preview.appendChild(badge);
+    if(badgeContainer) badgeContainer.appendChild(badge);
   };
   reader.readAsArrayBuffer(file);
 }
@@ -4607,7 +4657,7 @@ function saveBulkTableStateBeforeCamera(rowEl){
   }));
   const previewElId = isBulkEdit ? null : table.closest('[id$="Preview"]')?.id;
   try{
-    sessionStorage.setItem('bulkTableStateBeforeCamera', JSON.stringify({
+    localStorage.setItem('bulkTableStateBeforeCamera', JSON.stringify({
       kind: isBulkEdit ? 'edit' : 'new', previewElId, rows, ts: Date.now()
     }));
   }catch(e){}
@@ -4616,9 +4666,9 @@ function saveBulkTableStateBeforeCamera(rowEl){
 // 앱이 다시 켜졌을 때(관리자 모드 진입 이후) 대량입력/대량수정 표 내용을 복구함
 function restoreBulkTableStateIfAny(){
   let raw;
-  try{ raw = sessionStorage.getItem('bulkTableStateBeforeCamera'); }catch(e){ return; }
+  try{ raw = localStorage.getItem('bulkTableStateBeforeCamera'); }catch(e){ return; }
   if(!raw) return;
-  sessionStorage.removeItem('bulkTableStateBeforeCamera');
+  localStorage.removeItem('bulkTableStateBeforeCamera');
   let state;
   try{ state = JSON.parse(raw); }catch(e){ return; }
   if(!state || Date.now() - state.ts > 10*60*1000 || !state.rows?.length) return; // 10분 넘으면 복구 안 함
