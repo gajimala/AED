@@ -854,11 +854,16 @@ let _cache = null;
 let _resolveLoaded = null;
 const _loadedPromise = new Promise(res=>{ _resolveLoaded = res; });
 
-// 지도 데이터를 저장소에 그대로 올려둔 정적 파일에서 읽음 — 무료, 사실상 무제한, 캐시 안 씀(최신값 보장)
+// 지도 데이터를 저장소에 그대로 올려둔 정적 파일에서 읽음 — 무료, 사실상 무제한.
+// ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — cache:'no-store'는 브라우저 자체
+// 캐시만 막을 뿐, GitHub Pages의 CDN 캐시까지는 우회 못 함(다른 파일들에서 이미 겪은 것과
+// 똑같은 문제). 그래서 관리자 본인 기기에선 방금 수정한 최신값이 메모리에 남아있어 바로
+// 반영된 것처럼 보이지만, 새로고침하거나 다른 기기에서 접속하면 CDN에 남아있던 예전 버전
+// (예: lastEditSource가 아직 'civilian'이던 시절)을 계속 받아오는 문제가 있었음.
 async function ensureLoaded(){
   if(_cache) return _cache;
   try{
-    const res = await fetch(SEED_JSON_URL, { cache: 'no-store' });
+    const res = await fetch(`${SEED_JSON_URL}?v=${Date.now()}`, { cache: 'no-store' });
     if(!res.ok) throw new Error('HTTP '+res.status);
     _cache = await res.json();
   }catch(e){
@@ -2454,8 +2459,17 @@ function openReportFlow(type){
   if(type==='add'){
     document.getElementById('reportAddr').textContent = '새로 발견한 구조함 위치를 제보합니다.';
   } else {
-    const rec = markerObjs[currentMarkerId].record;
-    document.getElementById('reportAddr').textContent = rec.addr || '(주소 미입력) 구조함';
+    // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — markerObjs[currentMarkerId]가
+    // 혹시라도 없으면(지도가 다시 그려지는 타이밍 등으로 아직 등록 안 됐을 때) 이 줄에서
+    // 에러가 나서 함수가 그대로 멈춰버렸음 — "메시지박스가 그냥 꺼지는" 증상과 정확히
+    // 일치함. markerObjs에 없으면 전체 목록(loadRecords)에서라도 찾아서 정상 진행되게 함.
+    const found = markerObjs[currentMarkerId] ? markerObjs[currentMarkerId].record
+                : loadRecords().find(r => r.id === currentMarkerId);
+    if(!found){
+      alert('구조함 정보를 불러오지 못했습니다. 다시 시도해주세요.');
+      return;
+    }
+    document.getElementById('reportAddr').textContent = found.addr || '(주소 미입력) 구조함';
   }
 
   document.getElementById('reportCoordDisplay').style.display = 'none';
@@ -2794,10 +2808,19 @@ function restoreAdminFormStateIfAny(){
   }
 }
 
+let _adminPhotoReadyPromise = { newLat: null, editLat: null }; // 썸네일 생성이 끝났는지 기다릴 수 있는 약속(Promise)
+
 function handleAdminPhotoCapture(file, latId, lngId, previewId){
   if(!file) return;
   const preview = document.getElementById(previewId);
   preview.innerHTML = '<div class="hint">사진 처리 중…</div>';
+
+  // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — GPS 좌표 추출(아래 2번, 빠름)과
+  // 썸네일 생성(아래 1번, 사진 디코딩 필요해서 더 오래 걸림)이 각각 별도로 비동기 처리됨.
+  // 좌표가 먼저 채워진 걸 보고 바로 "등록"을 누르면, 썸네일이 미처 다 안 만들어진 상태로
+  // 저장돼서 사진이 빠질 수 있었음. 저장 버튼 쪽에서 이 약속(Promise)을 기다리게 해서,
+  // 사진 처리가 끝난 뒤에만 실제 저장이 진행되게 함.
+  _adminPhotoReadyPromise[latId] = new Promise((resolve)=>{
 
   // 1) 축소 썸네일 생성(저장 용량 절약 — 민간인 제보 때와 동일한 방식)
   const imgUrl = URL.createObjectURL(file);
@@ -2812,8 +2835,11 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
     _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
     preview.innerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
     URL.revokeObjectURL(imgUrl);
+    resolve();
   };
   imgEl.src = imgUrl;
+
+  });
 
   // 2) 원본 바이트에서 EXIF GPS 파싱 → 위도/경도 입력칸 자동 채움
   const reader = new FileReader();
@@ -3346,7 +3372,9 @@ document.getElementById('cprConfirmClose').addEventListener('click', function(){
 
 
 function openDirections(){
-  const rec = markerObjs[currentMarkerId].record;
+  const found = markerObjs[currentMarkerId] ? markerObjs[currentMarkerId].record : loadRecords().find(r => r.id === currentMarkerId);
+  if(!found){ alert('구조함 정보를 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+  const rec = found;
   const name = encodeURIComponent(rec.addr || '인명구조함');
   // 카카오맵 길찾기 딥링크: 앱 설치돼 있으면 카카오맵 앱으로, 아니면 웹으로 열림
   const url = `https://map.kakao.com/link/to/${name},${rec.lat},${rec.lng}`;
@@ -3393,6 +3421,13 @@ function cancelEditCoord(){
   document.getElementById('editActions').style.display='none';
 }
 async function saveEditCoord(){
+  // 사진을 찍었으면(약속이 있으면) 처리가 끝날 때까지 기다린 뒤 저장 진행(addSingle과 동일한 이유)
+  if(_adminPhotoReadyPromise.editLat){
+    const msg0 = document.getElementById('markerMsg');
+    msg0.textContent = '사진 처리 중… 잠시만 기다려주세요.'; msg0.className='msg ok'; msg0.style.display='block';
+    await _adminPhotoReadyPromise.editLat;
+    _adminPhotoReadyPromise.editLat = null;
+  }
   const lat = parseFloat(document.getElementById('editLat').value);
   const lng = parseFloat(document.getElementById('editLng').value);
   const addr = document.getElementById('editAddr').value.trim();
@@ -4028,6 +4063,15 @@ async function revertChange(id){
 
 /* ---------------- 신규입력 ---------------- */
 async function addSingle(){
+  // ⚠️ 진짜 원인이었을 가능성이 높음 — 사진의 GPS 좌표는 빨리 채워지지만, 실제 등록될
+  // 사진(썸네일)은 더 오래 걸려서, 좌표만 보고 바로 저장하면 사진이 빠질 수 있었음.
+  // 사진을 찍었으면(약속이 있으면) 그 처리가 끝날 때까지 기다린 뒤에 저장을 진행함.
+  if(_adminPhotoReadyPromise.newLat){
+    const msg0 = document.getElementById('newMsg');
+    msg0.textContent = '사진 처리 중… 잠시만 기다려주세요.'; msg0.className='msg ok'; msg0.style.display='block';
+    await _adminPhotoReadyPromise.newLat;
+    _adminPhotoReadyPromise.newLat = null;
+  }
   const lat = parseFloat(document.getElementById('newLat').value);
   const lng = parseFloat(document.getElementById('newLng').value);
   const addr = document.getElementById('newAddr').value.trim();
