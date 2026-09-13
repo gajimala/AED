@@ -199,6 +199,10 @@
     position:fixed;inset:0;background:rgba(8,20,30,.45);z-index:800;
     display:none;align-items:flex-end;justify-content:center;
   }
+  /* ⚠️ 진짜 원인이었음(사용자가 발견함) — 모든 오버레이가 같은 z-index(800)를 써서,
+     대량입력/수정 패널이 이미 열려있는 상태에서 카메라 창을 열면 그 뒤에 숨어버렸음.
+     카메라는 항상 제일 위에 떠야 하므로 더 높은 값을 줌. */
+  #inAppCameraOverlay{ z-index:950; }
   .overlay.center{align-items:center;}
   .overlay.show{display:flex;}
   .sheet{
@@ -2858,6 +2862,29 @@ let _inAppCameraStream = null;
 let _inAppCameraTarget = null; // { latId, lngId, previewId }
 let _inAppCameraGpsPromise = null;
 
+async function openInAppCameraForRow(rowEl){
+  _inAppCameraTarget = { rowEl };
+  const msg = document.getElementById('inAppCameraMsg');
+  msg.style.display = 'none';
+
+  _inAppCameraGpsPromise = new Promise((resolve)=>{
+    if(!navigator.geolocation){ resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      ()=>resolve(null),
+      { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
+    );
+  });
+
+  try{
+    _inAppCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    document.getElementById('inAppCameraVideo').srcObject = _inAppCameraStream;
+    document.getElementById('inAppCameraOverlay').classList.add('show');
+  }catch(e){
+    alert('카메라를 열 수 없습니다: ' + e.message + '\n대신 "📷" 버튼으로 사진을 골라주세요.');
+  }
+}
+
 async function openInAppCamera(latId, lngId, previewId){
   _inAppCameraTarget = { latId, lngId, previewId };
   const msg = document.getElementById('inAppCameraMsg');
@@ -2894,7 +2921,6 @@ function closeInAppCamera(){
 
 async function captureInAppPhoto(){
   if(!_inAppCameraTarget) return;
-  const { latId, lngId, previewId } = _inAppCameraTarget;
   const msg = document.getElementById('inAppCameraMsg');
   msg.textContent = '처리 중…'; msg.className = 'msg ok'; msg.style.display = 'block';
 
@@ -2905,27 +2931,45 @@ async function captureInAppPhoto(){
   canvas.width = video.videoWidth * scale;
   canvas.height = video.videoHeight * scale;
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-  _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
+  const photoDataUrl = canvas.toDataURL('image/jpeg', 0.6);
 
-  const preview = document.getElementById(previewId);
-  preview.innerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
-
-  // 카메라 여는 시점부터 병렬로 조회해둔 GPS 결과를 기다림(대부분 이미 끝나있음)
   const gps = await _inAppCameraGpsPromise;
-  const badge = document.createElement('div');
-  if(gps){
-    document.getElementById(latId).value = gps.lat.toFixed(6);
-    document.getElementById(lngId).value = gps.lng.toFixed(6);
-    if(latId === 'newLat') onNewLatLngTyped();
-    badge.className = 'gps-badge ok';
-    badge.textContent = `📍 현재 위치로 자동입력됨 (${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)})`;
-  } else {
-    badge.className = 'gps-badge warn';
-    badge.textContent = '⚠️ 위치를 가져오지 못했습니다 — 위도/경도를 직접 입력해주세요';
-  }
-  preview.appendChild(badge);
 
-  _adminPhotoReadyPromise[latId] = Promise.resolve(); // 이미 다 끝난 상태이므로 저장 시 즉시 통과
+  if(_inAppCameraTarget.rowEl){
+    // ⚠️ 대량입력/대량수정 표의 각 줄에서 호출된 경우 — 표 줄 안의 좌표칸을 직접 채움
+    const rowEl = _inAppCameraTarget.rowEl;
+    const latInput = rowEl.querySelector('.be-lat, .bn-lat');
+    const lngInput = rowEl.querySelector('.be-lng, .bn-lng');
+    if(gps && latInput && lngInput){
+      latInput.value = gps.lat.toFixed(6);
+      lngInput.value = gps.lng.toFixed(6);
+      rowEl.style.background = '#EAF7EE';
+      setTimeout(()=>{ rowEl.style.background = ''; }, 1200);
+    } else if(!gps){
+      alert('위치를 가져오지 못했습니다. 좌표를 직접 입력해주세요.');
+    }
+    // 표 줄의 사진 데이터는 rowEl에 직접 매달아둠(각 줄마다 별도 보관, 저장 시 이 값을 읽어감)
+    rowEl._capturedPhotoDataUrl = photoDataUrl;
+  } else {
+    // 신규입력/좌표수정 단일 폼에서 호출된 경우
+    const { latId, lngId, previewId } = _inAppCameraTarget;
+    _adminPhotoDataUrl[latId] = photoDataUrl;
+    const preview = document.getElementById(previewId);
+    preview.innerHTML = `<img src="${photoDataUrl}" style="max-width:160px;border-radius:8px;">`;
+    const badge = document.createElement('div');
+    if(gps){
+      document.getElementById(latId).value = gps.lat.toFixed(6);
+      document.getElementById(lngId).value = gps.lng.toFixed(6);
+      if(latId === 'newLat') onNewLatLngTyped();
+      badge.className = 'gps-badge ok';
+      badge.textContent = `📍 현재 위치로 자동입력됨 (${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)})`;
+    } else {
+      badge.className = 'gps-badge warn';
+      badge.textContent = '⚠️ 위치를 가져오지 못했습니다 — 위도/경도를 직접 입력해주세요';
+    }
+    preview.appendChild(badge);
+    _adminPhotoReadyPromise[latId] = Promise.resolve();
+  }
   closeInAppCamera();
 }
 
@@ -4300,8 +4344,8 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
             <td><input type="text" class="bn-lng" value="${r.lng}" style="width:100px;"></td>
             <td><input type="text" class="bn-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
             <td style="text-align:center;white-space:nowrap;">
-              <label style="cursor:pointer;font-size:16px;" title="바로 촬영">
-                📸<input type="file" accept="image/*" capture="environment" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
+              <label style="cursor:pointer;font-size:16px;" title="바로 촬영(재시작 없음)" onclick="event.preventDefault(); openInAppCameraForRow(this.closest('tr'));">
+                📸
               </label>
               <label style="cursor:pointer;font-size:16px;margin-left:4px;" title="사진 선택(카메라/앨범)">
                 📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
@@ -4319,12 +4363,15 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     // 등록 직전에 표에 지금 보이는(수정됐을 수도, 지워졌을 수도 있는) 값을 그대로 다시 읽음
     const rows = document.querySelectorAll(`#${previewElId}_body tr`);
     const toSave = []; let formatErrors = 0;
+    const rowPhotoMap = {}; // id -> 촬영한 사진(base64) — 메인 레코드에는 안 섞고 따로 관리
     rows.forEach(tr=>{
       const lat = parseFloat(tr.querySelector('.bn-lat').value);
       const lng = parseFloat(tr.querySelector('.bn-lng').value);
       if(isNaN(lat) || isNaN(lng)){ formatErrors++; return; }
+      const id = tr.dataset.id;
+      if(tr._capturedPhotoDataUrl) rowPhotoMap[id] = tr._capturedPhotoDataUrl;
       toSave.push({
-        id: tr.dataset.id, lat, lng,
+        id, lat, lng,
         addr: tr.querySelector('.bn-addr').value.trim(),
         note: tr.querySelector('.bn-note').value.trim(),
         lastEditSource: 'admin'
@@ -4336,6 +4383,11 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     msg.textContent = `${toSave.length}건 저장 중…`; msg.className='msg'; msg.style.display='block';
     const results = await saveRecordsSequentially(toSave, upsertRecord, (done, total)=>{
       msg.textContent = `저장 중… (${done}/${total})`; msg.className='msg'; msg.style.display='block';
+    });
+    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 표 안 인앱 카메라로 찍은 사진이 저장은
+    // 되는데 정작 업로드하는 코드가 없어서 통째로 버려지고 있었음. 저장 성공한 것만 사진도 업로드.
+    results.forEach((r, idx)=>{
+      if(r.status === 'fulfilled' && rowPhotoMap[toSave[idx].id]) uploadPhotoDataUrl(toSave[idx].id, rowPhotoMap[toSave[idx].id]);
     });
     let failCount = 0;
     results.forEach((r, idx)=>{
@@ -4700,8 +4752,8 @@ function renderMoreBulkRows(){
       <td><input type="text" class="be-lng" value="${r.lng}" style="width:100px;"></td>
       <td><input type="text" class="be-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
       <td style="text-align:center;white-space:nowrap;">
-        <label style="cursor:pointer;font-size:16px;" title="바로 촬영">
-          📸<input type="file" accept="image/*" capture="environment" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
+        <label style="cursor:pointer;font-size:16px;" title="바로 촬영(재시작 없음)" onclick="event.preventDefault(); openInAppCameraForRow(this.closest('tr'));">
+          📸
         </label>
         <label style="cursor:pointer;font-size:16px;margin-left:4px;" title="사진 선택(카메라/앨범)">
           📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
@@ -4825,6 +4877,7 @@ async function saveBulkEdit(){
   if(btn){ btn.disabled = true; btn.textContent = '저장 중…'; }
 
   const toSave = []; let formatErrors = 0;
+  const rowPhotoMap = {}; // id -> 촬영한 사진(base64) — 별도로 관리해서 메인 레코드(lifesavers.json)에 안 섞이게 함
   rows.forEach(tr=>{
     const id = tr.dataset.id;
     const lat = parseFloat(tr.querySelector('.be-lat').value);
@@ -4832,6 +4885,11 @@ async function saveBulkEdit(){
     const addr = tr.querySelector('.be-addr').value.trim();
     const note = tr.querySelector('.be-note').value.trim();
     if(isNaN(lat) || isNaN(lng)){ formatErrors++; return; }
+    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 표 안 인앱 카메라로 찍은 사진이
+    // rowEl._capturedPhotoDataUrl에 저장은 되는데, 정작 이 저장 과정에서 그 값을
+    // 읽어가는 코드가 어디에도 없어서 사진이 통째로 버려지고 있었음. 여기서 챙겨서
+    // 별도로 기억해뒀다가, 저장 성공 후 아래에서 업로드함(메인 레코드에는 안 섞음).
+    if(tr._capturedPhotoDataUrl) rowPhotoMap[id] = tr._capturedPhotoDataUrl;
     toSave.push({id, lat, lng, addr, note, region: undefined, lastEditSource:'admin'});
   });
 
@@ -4847,6 +4905,7 @@ async function saveBulkEdit(){
     const rec = toSave[i];
     if(r.status === 'fulfilled'){
       updated++;
+      if(rowPhotoMap[rec.id]) uploadPhotoDataUrl(rec.id, rowPhotoMap[rec.id]); // 저장 성공한 것만 사진도 업로드
       if(markerObjs[rec.id]){
         markerObjs[rec.id].record = rec;
         markerObjs[rec.id].marker.setPosition(new kakao.maps.LatLng(rec.lat, rec.lng));
