@@ -4225,19 +4225,39 @@ async function revertChange(id){
 
   try{
     if(entry.type === 'add'){
-      // 신규 추가를 되돌림 = 그 구조함을 삭제
-      if(entry.targetId && markerObjs[entry.targetId]){
-        clusterer.removeMarker(markerObjs[entry.targetId].marker);
-        delete markerObjs[entry.targetId];
+      // ⚠️ 대량입력 취소 지원 추가 — targetId가 배열이면(대량입력) 안의 id를 전부 삭제,
+      // 단일 값이면(기존 개별 등록) 예전 방식 그대로
+      const idsToDelete = Array.isArray(entry.targetId) ? entry.targetId : (entry.targetId ? [entry.targetId] : []);
+      for(const tid of idsToDelete){
+        if(markerObjs[tid]){
+          clusterer.removeMarker(markerObjs[tid].marker);
+          delete markerObjs[tid];
+        }
+        await deleteRecord(tid);
       }
-      if(entry.targetId) await deleteRecord(entry.targetId);
     } else if(entry.type === 'delete'){
       // 삭제를 되돌림 = 예전 좌표로 다시 등록(내부적으로 새 id가 생김 — 예전 id는 복구 불가)
       const rec = {id:newId(), lat:entry.oldLat, lng:entry.oldLng, addr:entry.addr||'', note:'', lastEditSource:'admin'};
       await upsertRecord(rec);
       addMarkerToMap(rec);
     } else { // edit — 예전 좌표로 되돌림
-      if(entry.targetId && markerObjs[entry.targetId]){
+      // ⚠️ 요청받은 개선 — 대량수정(표에서 직접 저장)도 취소 가능하게 함. targetId가
+      // 스냅샷 배열이면(대량수정) 각 항목을 자기 자신의 "수정 전" 값으로 개별 복원.
+      // 단일 값이면(기존 개별 수정) 예전 방식 그대로.
+      if(Array.isArray(entry.targetId)){
+        for(const snap of entry.targetId){
+          if(markerObjs[snap.id]){
+            const rec = {...markerObjs[snap.id].record, lat:snap.lat, lng:snap.lng, addr:snap.addr, note:snap.note, region: undefined, lastEditSource:'admin'};
+            await upsertRecord(rec);
+            markerObjs[snap.id].record = rec;
+            markerObjs[snap.id].marker.setPosition(new kakao.maps.LatLng(snap.lat, snap.lng));
+            markerObjs[snap.id].marker.setImage(pickLifesaverIcon(rec));
+          } else {
+            const rec = loadRecords().find(r=>r.id===snap.id);
+            if(rec) await upsertRecord({...rec, lat:snap.lat, lng:snap.lng, addr:snap.addr, note:snap.note, region: undefined, lastEditSource:'admin'});
+          }
+        }
+      } else if(entry.targetId && markerObjs[entry.targetId]){
         const rec = {...markerObjs[entry.targetId].record, lat:entry.oldLat, lng:entry.oldLng, region: undefined, lastEditSource:'admin'};
         await upsertRecord(rec);
         markerObjs[entry.targetId].record = rec;
@@ -4406,7 +4426,11 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
       }
     });
     classifyMissingRegions();
-    if(toSave.length>0) logAdminChange('add', null, `${toSave.length}건`, null, null, null, null, `관리자 대량입력(${logLabel}) — ${toSave.length}건 등록`);
+    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — targetId를 null로 남겨서, 나중에 변경이력에서
+    // "취소" 버튼을 눌러도 revertChange가 지울 대상을 못 찾아 아무 일도 안 일어났음.
+    // 실제로 성공한 항목들의 id 배열을 넣어서, 취소 시 전부 지울 수 있게 함.
+    const succeededIds = toSave.filter((_, idx) => results[idx].status === 'fulfilled').map(r => r.id);
+    if(toSave.length>0) logAdminChange('add', succeededIds, `${toSave.length}건`, null, null, null, null, `관리자 대량입력(${logLabel}) — ${toSave.length}건 등록`);
     if(failCount===0){
       msg.textContent = `${toSave.length}건 등록 완료! 지도에 즉시 반영되었습니다.${formatErrors? ` (${formatErrors}건은 좌표 오류로 제외)`:''}`; msg.className='msg ok';
     } else {
@@ -4885,6 +4909,7 @@ async function saveBulkEdit(){
 
   const toSave = []; let formatErrors = 0;
   const rowPhotoMap = {}; // id -> 촬영한 사진(base64) — 별도로 관리해서 메인 레코드(lifesavers.json)에 안 섞이게 함
+  const beforeSnapshots = []; // 취소(되돌리기) 지원을 위해 각 항목의 "수정 전" 상태를 기억해둠
   rows.forEach(tr=>{
     const id = tr.dataset.id;
     const lat = parseFloat(tr.querySelector('.be-lat').value);
@@ -4897,6 +4922,10 @@ async function saveBulkEdit(){
     // 읽어가는 코드가 어디에도 없어서 사진이 통째로 버려지고 있었음. 여기서 챙겨서
     // 별도로 기억해뒀다가, 저장 성공 후 아래에서 업로드함(메인 레코드에는 안 섞음).
     if(_bulkRowPhotoStore[id]) rowPhotoMap[id] = _bulkRowPhotoStore[id];
+    if(markerObjs[id]){
+      const before = markerObjs[id].record;
+      beforeSnapshots.push({ id, lat:before.lat, lng:before.lng, addr:before.addr, note:before.note });
+    }
     toSave.push({id, lat, lng, addr, note, region: undefined, lastEditSource:'admin'});
   });
 
@@ -4927,7 +4956,12 @@ async function saveBulkEdit(){
   clusterer.redraw();
   if(updated>0){
     classifyMissingRegions();
-    logAdminChange('edit', null, `${updated}건`, null, null, null, null, `관리자 대량수정(표에서 직접 저장) — ${updated}건 변경`);
+    // ⚠️ 요청받은 개선 — 예전엔 targetId를 null로 남겨서 "취소" 버튼을 눌러도 무엇을
+    // 되돌려야 할지 몰라 아무 일도 안 일어났음. 성공한 항목들의 "수정 전 상태"를 배열로
+    // 담아서 넘김 — revertChange가 각 항목을 개별적으로 예전 값으로 되돌릴 수 있게 함.
+    const succeededIds = new Set(toSave.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id));
+    const succeededSnapshots = beforeSnapshots.filter(s => succeededIds.has(s.id));
+    logAdminChange('edit', succeededSnapshots, `${updated}건`, null, null, null, null, `관리자 대량수정(표에서 직접 저장) — ${updated}건 변경`);
   }
   if(btn){ btn.disabled = false; btn.textContent = '보이는 항목 저장'; }
   const errTotal = formatErrors + saveErrors;
