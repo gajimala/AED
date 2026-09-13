@@ -472,7 +472,7 @@
           <label>사진으로 위치 자동입력 (선택)</label>
           <input type="file" id="editPhotoInputCam" accept="image/*" capture="environment" style="display:none;" onclick="saveAdminFormStateBeforeCamera('editLat')" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
           <button type="button" class="btn btn-navy btn-sm" onclick="useCurrentLocationDirect('editLat','editLng',this)">📍 현재 위치로 채우기(카메라 안 씀)</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('editPhotoInputCam').click()">📸 바로 촬영</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="openInAppCamera('editLat','editLng','editPhotoPreview')">📸 바로 촬영(재시작 없음)</button>
           <input type="file" id="editPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('editLat')" onchange="handleAdminPhotoCapture(this.files[0], 'editLat', 'editLng', 'editPhotoPreview')">
           <div id="editPhotoPreview" style="margin-top:6px;"></div>
         </div>
@@ -493,6 +493,21 @@
 </div>
 
 <!-- 위치 수정요청 / 신규제보 / 삭제신고 (공용) -->
+<div class="overlay" id="inAppCameraOverlay">
+  <div class="sheet" style="max-width:480px;">
+    <div style="padding:14px;">
+      <div class="hint" style="margin-bottom:10px;">앱 안에서 바로 촬영합니다(폰 카메라 앱을 열지 않아 재시작 문제가 없습니다). 사진에는 위치정보가 안 남아서, 촬영과 동시에 GPS로 현재 위치를 같이 가져옵니다.</div>
+      <video id="inAppCameraVideo" autoplay playsinline style="width:100%;border-radius:10px;background:#000;"></video>
+      <canvas id="inAppCameraCanvas" style="display:none;"></canvas>
+      <div id="inAppCameraMsg" class="msg" style="display:none;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="btn btn-orange" style="flex:1;" onclick="captureInAppPhoto()">📸 촬영</button>
+        <button class="btn btn-ghost" onclick="closeInAppCamera()">취소</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="reportOverlay">
   <div class="sheet" id="reportSheet">
     <div class="sheet-handle"></div>
@@ -694,7 +709,7 @@
             <label>사진으로 위치 자동입력 (선택)</label>
             <input type="file" id="newPhotoInputCam" accept="image/*" capture="environment" style="display:none;" onclick="saveAdminFormStateBeforeCamera('newLat')" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
             <button type="button" class="btn btn-navy btn-sm" onclick="useCurrentLocationDirect('newLat','newLng',this)">📍 현재 위치로 채우기(카메라 안 씀)</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('newPhotoInputCam').click()">📸 바로 촬영</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="openInAppCamera('newLat','newLng','newPhotoPreview')">📸 바로 촬영(재시작 없음)</button>
             <input type="file" id="newPhotoInput" accept="image/*" onclick="saveAdminFormStateBeforeCamera('newLat')" onchange="handleAdminPhotoCapture(this.files[0], 'newLat', 'newLng', 'newPhotoPreview')">
             <div id="newPhotoPreview" style="margin-top:6px;"></div>
             <div class="hint" style="margin-top:4px;">사진에 위치정보(GPS)가 있으면 위도/경도가 자동으로 채워집니다. 필수는 아니며, 직접 입력해도 됩니다.</div>
@@ -2833,6 +2848,87 @@ let _adminPhotoReadyPromise = { newLat: null, editLat: null }; // 썸네일 생�
 // 운영체제가 메모리 확보를 위해 앱을 통째로 재시작시키는 문제를 원천적으로 피할 수 있음
 // (사진을 안 거치니까 애초에 배경으로 밀려날 일이 없음). 관리자가 현장에서 직접 등록할
 // 때, 사진 없이 좌표만 빠르게 채우고 싶을 때 씀.
+// ⚠️ 요청받은 근본 해결책 — 폰의 진짜 카메라 앱을 여는 대신(그래서 운영체제가 배경으로
+// 보내진 우리 앱을 메모리 확보를 위해 꺼버리는 문제가 있었음), 우리 화면 안에서 카메라
+// 영상을 직접 띄우는 방식으로 바꿈. 이러면 우리 앱이 배경으로 밀려날 일 자체가 없어서
+// 재시작 문제가 원천적으로 생기지 않음. 대신 이렇게 찍은 사진에는 EXIF 위치정보가 안
+// 남으므로(캔버스로 캡처한 이미지라 카메라 앱이 남기는 GPS 태그가 없음), 촬영과 동시에
+// navigator.geolocation으로 현재 위치를 따로 받아와서 대체함.
+let _inAppCameraStream = null;
+let _inAppCameraTarget = null; // { latId, lngId, previewId }
+let _inAppCameraGpsPromise = null;
+
+async function openInAppCamera(latId, lngId, previewId){
+  _inAppCameraTarget = { latId, lngId, previewId };
+  const msg = document.getElementById('inAppCameraMsg');
+  msg.style.display = 'none';
+
+  // 카메라 화면을 여는 것과 동시에 GPS 조회도 병렬로 시작(촬영 버튼 누를 때까지 기다리는
+  // 동안 위치 확인이 끝나있을 가능성이 높아 체감 대기시간이 줄어듦)
+  _inAppCameraGpsPromise = new Promise((resolve)=>{
+    if(!navigator.geolocation){ resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      ()=>resolve(null),
+      { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
+    );
+  });
+
+  try{
+    _inAppCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    document.getElementById('inAppCameraVideo').srcObject = _inAppCameraStream;
+    document.getElementById('inAppCameraOverlay').classList.add('show');
+  }catch(e){
+    alert('카메라를 열 수 없습니다: ' + e.message + '\n대신 "📷 선택" 버튼으로 사진을 골라주세요.');
+  }
+}
+
+function closeInAppCamera(){
+  if(_inAppCameraStream){
+    _inAppCameraStream.getTracks().forEach(track=>track.stop()); // 카메라 자원 확실히 해제
+    _inAppCameraStream = null;
+  }
+  document.getElementById('inAppCameraOverlay').classList.remove('show');
+  _inAppCameraTarget = null;
+}
+
+async function captureInAppPhoto(){
+  if(!_inAppCameraTarget) return;
+  const { latId, lngId, previewId } = _inAppCameraTarget;
+  const msg = document.getElementById('inAppCameraMsg');
+  msg.textContent = '처리 중…'; msg.className = 'msg ok'; msg.style.display = 'block';
+
+  const video = document.getElementById('inAppCameraVideo');
+  const canvas = document.getElementById('inAppCameraCanvas');
+  const maxW = 480;
+  const scale = Math.min(1, maxW / video.videoWidth);
+  canvas.width = video.videoWidth * scale;
+  canvas.height = video.videoHeight * scale;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
+
+  const preview = document.getElementById(previewId);
+  preview.innerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
+
+  // 카메라 여는 시점부터 병렬로 조회해둔 GPS 결과를 기다림(대부분 이미 끝나있음)
+  const gps = await _inAppCameraGpsPromise;
+  const badge = document.createElement('div');
+  if(gps){
+    document.getElementById(latId).value = gps.lat.toFixed(6);
+    document.getElementById(lngId).value = gps.lng.toFixed(6);
+    if(latId === 'newLat') onNewLatLngTyped();
+    badge.className = 'gps-badge ok';
+    badge.textContent = `📍 현재 위치로 자동입력됨 (${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)})`;
+  } else {
+    badge.className = 'gps-badge warn';
+    badge.textContent = '⚠️ 위치를 가져오지 못했습니다 — 위도/경도를 직접 입력해주세요';
+  }
+  preview.appendChild(badge);
+
+  _adminPhotoReadyPromise[latId] = Promise.resolve(); // 이미 다 끝난 상태이므로 저장 시 즉시 통과
+  closeInAppCamera();
+}
+
 function useCurrentLocationDirect(latId, lngId, btn){
   if(!navigator.geolocation){ alert('이 기기에서 위치 기능을 지원하지 않습니다.'); return; }
   const latInput = document.getElementById(latId), lngInput = document.getElementById(lngId);
@@ -2856,59 +2952,58 @@ function useCurrentLocationDirect(latId, lngId, btn){
 function handleAdminPhotoCapture(file, latId, lngId, previewId){
   if(!file) return;
   const preview = document.getElementById(previewId);
-  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 썸네일(사진 미리보기)과 GPS 배지가 같은
-  // preview 칸의 innerHTML을 각자 통째로 덮어쓰고 있었음. GPS 추출이 먼저 끝나서 배지를
-  // 띄워도, 그 뒤에 썸네일 생성이 끝나면서 preview.innerHTML을 통째로 새로 써버려서 방금
-  // 뜬 배지가 사라져버렸음(좌표 자체는 입력칸에 정상적으로 들어갔지만, 확인 메시지만
-  // 사라져서 "안 된 것처럼" 보였던 것). 서로 다른 하위 칸을 각각 따로 써서 겹치지 않게 함.
   preview.innerHTML = '<div class="hint" id="'+previewId+'_thumb">사진 처리 중…</div><div id="'+previewId+'_badge"></div>';
   const thumbEl = document.getElementById(previewId+'_thumb');
   const badgeContainer = document.getElementById(previewId+'_badge');
 
-  // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — GPS 좌표 추출(아래 2번, 빠름)과
-  // 썸네일 생성(아래 1번, 사진 디코딩 필요해서 더 오래 걸림)이 각각 별도로 비동기 처리됨.
-  // 좌표가 먼저 채워진 걸 보고 바로 "등록"을 누르면, 썸네일이 미처 다 안 만들어진 상태로
-  // 저장돼서 사진이 빠질 수 있었음. 저장 버튼 쪽에서 이 약속(Promise)을 기다리게 해서,
-  // 사진 처리가 끝난 뒤에만 실제 저장이 진행되게 함.
-  _adminPhotoReadyPromise[latId] = new Promise((resolve)=>{
-
-  // 1) 축소 썸네일 생성(저장 용량 절약 — 민간인 제보 때와 동일한 방식)
-  const imgUrl = URL.createObjectURL(file);
-  const imgEl = new Image();
-  imgEl.onload = ()=>{
-    const maxW = 480;
-    const scale = Math.min(1, maxW / imgEl.width);
-    const canvas = document.createElement('canvas');
-    canvas.width = imgEl.width * scale;
-    canvas.height = imgEl.height * scale;
-    canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
-    _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
-    if(thumbEl) thumbEl.outerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
-    URL.revokeObjectURL(imgUrl);
-    resolve();
-  };
-  imgEl.src = imgUrl;
-
+  // ⚠️ 진짜 원인이었음(사용자가 실제 저장 결과로 발견함 — 좌표가 0.000000으로 저장됨) —
+  // 예전엔 "썸네일 생성"만 기다리는 약속(Promise)이었고, "GPS 좌표 추출"은 완전히 별개의
+  // 비동기 작업인데 전혀 기다리지 않았음. 사진을 고르자마자 바로 "등록"을 누르면, 좌표
+  // 추출이 채 끝나기도 전에 입력칸이 비어있는 상태로 저장돼버렸음(빈 값이 0으로 처리됨).
+  // 이제 "썸네일 생성"과 "GPS 추출" 둘 다 끝나야만 이 약속이 풀리게(Promise.all) 만들어서,
+  // 저장 버튼이 정말로 둘 다 기다리게 함.
+  const thumbnailPromise = new Promise((resolve)=>{
+    const imgUrl = URL.createObjectURL(file);
+    const imgEl = new Image();
+    imgEl.onload = ()=>{
+      const maxW = 480;
+      const scale = Math.min(1, maxW / imgEl.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = imgEl.width * scale;
+      canvas.height = imgEl.height * scale;
+      canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+      _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
+      if(thumbEl) thumbEl.outerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
+      URL.revokeObjectURL(imgUrl);
+      resolve();
+    };
+    imgEl.onerror = ()=>resolve(); // 썸네일 실패해도 GPS 추출까지 막지 않음(사진 없이도 좌표는 쓸 수 있게)
+    imgEl.src = imgUrl;
   });
 
-  // 2) 원본 바이트에서 EXIF GPS 파싱 → 위도/경도 입력칸 자동 채움
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    const gps = parseExifGPS(e.target.result);
-    const badge = document.createElement('div');
-    if(gps){
-      document.getElementById(latId).value = gps.lat.toFixed(6);
-      document.getElementById(lngId).value = gps.lng.toFixed(6);
-      if(latId === 'newLat') onNewLatLngTyped(); // 신규입력 화면은 지도 위 아이콘도 같이 옮겨야 하므로 이 함수 재사용
-      badge.className = 'gps-badge ok';
-      badge.textContent = `📍 사진에서 위치 자동입력됨 (${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)})`;
-    } else {
-      badge.className = 'gps-badge warn';
-      badge.textContent = '⚠️ 사진에서 위치정보를 찾지 못했습니다 — 위도/경도를 직접 입력해주세요';
-    }
-    if(badgeContainer) badgeContainer.appendChild(badge);
-  };
-  reader.readAsArrayBuffer(file);
+  const gpsPromise = new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const gps = parseExifGPS(e.target.result);
+      const badge = document.createElement('div');
+      if(gps){
+        document.getElementById(latId).value = gps.lat.toFixed(6);
+        document.getElementById(lngId).value = gps.lng.toFixed(6);
+        if(latId === 'newLat') onNewLatLngTyped(); // 신규입력 화면은 지도 위 아이콘도 같이 옮겨야 하므로 이 함수 재사용
+        badge.className = 'gps-badge ok';
+        badge.textContent = `📍 사진에서 위치 자동입력됨 (${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)})`;
+      } else {
+        badge.className = 'gps-badge warn';
+        badge.textContent = '⚠️ 사진에서 위치정보를 찾지 못했습니다 — 위도/경도를 직접 입력해주세요';
+      }
+      if(badgeContainer) badgeContainer.appendChild(badge);
+      resolve();
+    };
+    reader.onerror = ()=>resolve();
+    reader.readAsArrayBuffer(file);
+  });
+
+  _adminPhotoReadyPromise[latId] = Promise.all([thumbnailPromise, gpsPromise]);
 }
 
 // 저장이 실제로 성공한 뒤, 그 레코드 id로 방금 찍은 사진을 업로드함(실패해도 구조함 등록/수정
@@ -3483,6 +3578,13 @@ async function saveEditCoord(){
   const addr = document.getElementById('editAddr').value.trim();
   if(isNaN(lat) || isNaN(lng)){
     const m=document.getElementById('markerMsg'); m.textContent='위도/경도를 숫자로 입력하세요.'; m.className='msg err'; m.style.display='block';
+    return;
+  }
+  // ⚠️ 실제로 발생했던 사고 재발 방지 — 사진 GPS 추출이 채 안 끝난 상태로 저장되면 입력칸이
+  // 비어서 0으로 처리되는 경우가 있었음(사용자가 실제 저장 결과로 발견함). (0,0)은 이
+  // 서비스 지역(한국 연안)에서 나올 수 없는 값이므로, 이 값이면 무조건 막음.
+  if(lat === 0 && lng === 0){
+    const m=document.getElementById('markerMsg'); m.textContent='좌표가 0,0으로 되어있습니다. 사진 처리가 아직 안 끝났거나 위치를 다시 확인해주세요.'; m.className='msg err'; m.style.display='block';
     return;
   }
   const before = markerObjs[currentMarkerId].record;
@@ -4129,6 +4231,12 @@ async function addSingle(){
   const msg = document.getElementById('newMsg');
   if(isNaN(lat) || isNaN(lng)){
     msg.textContent='위도/경도를 정확히 입력하세요.'; msg.className='msg err'; msg.style.display='block'; return;
+  }
+  // ⚠️ 실제로 발생했던 사고 재발 방지 — 사진 GPS 추출이 채 안 끝난 상태로 저장되면 입력칸이
+  // 비어서 0으로 처리되는 경우가 있었음(사용자가 실제 저장 결과로 발견함: 0.000000 저장됨).
+  // (0,0)은 이 서비스 지역(한국 연안)에서 나올 수 없는 값이므로, 이 값이면 무조건 막음.
+  if(lat === 0 && lng === 0){
+    msg.textContent='좌표가 0,0으로 되어있습니다. 사진 처리가 아직 안 끝났거나 위치를 다시 확인해주세요.'; msg.className='msg err'; msg.style.display='block'; return;
   }
   const rec = {id:newId(), lat, lng, addr, note, lastEditSource:'admin'};
   addMarkerToMap(rec); // 지도에는 먼저 보여줌(반응성) — 아래에서 저장 결과에 따라 문구만 다르게 함
