@@ -383,7 +383,7 @@
   <div class="ring"></div>
   <h1>인명구조함 지도</h1>
   <p>카카오맵 불러오는 중…</p>
-  <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작 안전하세요</div>
+  <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작: 이환수</div>
 </div>
 
 <!-- 지도 -->
@@ -529,7 +529,7 @@
 
     <div style="margin-top:14px;">
       <label id="reportPhotoLabel">사진 첨부 (필수)</label>
-      <input type="file" id="reportPhoto" accept="image/*" capture="environment" onchange="onReportPhotoSelected(event)">
+      <input type="file" id="reportPhoto" accept="image/*" capture="environment" onclick="freeMemoryBeforeCamera()" onchange="onReportPhotoSelected(event)">
       <div id="reportPhotoPreview"></div>
     </div>
 
@@ -1686,7 +1686,30 @@ async function loadAedNationwide(){
     }
     document.getElementById('aedInfoBox').classList.remove('show');
   }
+  trimFarAwayAedDataIfTooLarge();
   renderAedInViewport();
+}
+
+// ⚠️ 추가 메모리 최적화 — 카메라 열기 직전에만 비우는 것 말고, 평소 사용 중에도 사용자가
+// 지도를 이리저리 멀리 옮겨 다니면 aedState.allItems가 계속 쌓이기만 하고 줄어들 일이
+// 없었음(누적된 시/도를 한 번도 안 지움). 너무 커지면(약 2만 건 초과) 지금 화면에서
+// 멀리 떨어진 지역의 데이터는 정리함 — 다시 그 지역으로 가면 자동으로 다시 받아오므로
+// 기능상 문제없음. 매번 하지 않고 "너무 커졌을 때만" 하도록 해서 불필요한 작업을 줄임.
+const AED_TRIM_THRESHOLD = 20000;
+function trimFarAwayAedDataIfTooLarge(){
+  if(aedState.allItems.length <= AED_TRIM_THRESHOLD) return;
+  const keepSido = new Set(getRelevantSidoForViewport()); // 지금 화면 근처만 유지
+  const before = aedState.allItems.length;
+  aedState.allItems = aedState.allItems.filter(item => keepSido.has(extractSidoFromAddress(item.address)));
+  [..._aedLoadedSido].forEach(sido => { if(!keepSido.has(sido)) _aedLoadedSido.delete(sido); }); // 지운 지역은 다시 갈 때 자동 재로딩되게 표시도 지움
+  console.log(`[AED] 메모리 정리: ${before}건 → ${aedState.allItems.length}건 (멀리 떨어진 지역 정리)`);
+}
+// 주소 문자열에서 시/도만 뽑는 간단한 버전(worker.js의 extractSido와 같은 방식) — 트리밍
+// 목적으로만 씀(정밀할 필요 없음, 어느 시/도 소속인지만 판단)
+function extractSidoFromAddress(addr){
+  if(!addr) return '기타';
+  const first = (addr.trim().split(/\s+/)[0] || '');
+  return AED_SIDO_LIST.includes(first) ? first : '기타';
 }
 
 // 지금 지도 화면(+여유분)과 경계가 겹치는 시/도만 골라냄 — 정밀할 필요 없이 "이 시/도를 아예
@@ -2798,13 +2821,18 @@ function saveAdminFormStateBeforeCamera(latId){
   }
   try{ localStorage.setItem('adminFormStateBeforeCamera', JSON.stringify(state)); }catch(e){}
 
-  // ⚠️ 요청받은 개선 — 카메라를 열면 폰 운영체제가 메모리 확보를 위해 우리 앱을 강제
-  // 종료시킬 수 있는데, 그 확률은 "우리 앱이 지금 메모리를 얼마나 쓰고 있는지"에 크게
-  // 좌우됨. 이 앱에서 제일 큰 메모리를 차지하는 건 전국 AED 데이터(누적하면 6만 건 이상,
-  // 지울 일이 없어서 계속 쌓이기만 함) — 카메라를 열기 직전에 이걸 비워서 메모리를 최대한
-  // 확보함. AED 데이터는 지도로 돌아왔을 때 화면에 보이는 만큼만 다시 자동으로 받아오도록
-  // 이미 설계되어 있어서(온디맨드 로딩), 비워도 기능상 문제는 없음 — 재시작 확률을 낮추기
-  // 위한 조치일 뿐, 100% 방지를 보장하지는 않음(운영체제 동작이라 완전한 통제는 불가능).
+  freeMemoryBeforeCamera();
+}
+
+// ⚠️ 요청받은 개선 — 카메라를 열면 폰 운영체제가 메모리 확보를 위해 우리 앱을 강제
+// 종료시킬 수 있는데, 그 확률은 "우리 앱이 지금 메모리를 얼마나 쓰고 있는지"에 크게
+// 좌우됨. 이 앱에서 제일 큰 메모리를 차지하는 건 전국 AED 데이터(누적하면 6만 건 이상,
+// 지울 일이 없어서 계속 쌓이기만 함) — 카메라를 열기 직전에 이걸 비워서 메모리를 최대한
+// 확보함. AED 데이터는 지도로 돌아왔을 때 화면에 보이는 만큼만 다시 자동으로 받아오도록
+// 이미 설계되어 있어서(온디맨드 로딩), 비워도 기능상 문제는 없음 — 재시작 확률을 낮추기
+// 위한 조치일 뿐, 100% 방지를 보장하지는 않음(운영체제 동작이라 완전한 통제는 불가능).
+// 관리자·민간인 양쪽의 카메라 여는 지점에서 공통으로 재사용함.
+function freeMemoryBeforeCamera(){
   try{
     if(typeof aedState !== 'undefined'){ aedState.allItems = []; }
     if(typeof _aedLoadedSido !== 'undefined'){ _aedLoadedSido.clear(); }
