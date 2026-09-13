@@ -2861,9 +2861,14 @@ let _adminPhotoReadyPromise = { newLat: null, editLat: null }; // 썸네일 생�
 let _inAppCameraStream = null;
 let _inAppCameraTarget = null; // { latId, lngId, previewId }
 let _inAppCameraGpsPromise = null;
+// ⚠️ 진짜 원인이었음(전수 재검토로 발견) — 대량입력 표는 "줄 추가"를 누르면 표 전체를
+// innerHTML로 통째로 다시 그림. 사진을 <tr> DOM 요소에 직접 매달아뒀었는데(_capturedPhotoDataUrl),
+// 표가 다시 그려지면 그 DOM 요소 자체가 통째로 새로 만들어지면서 매달아둔 사진이 같이
+// 사라졌음. DOM이 아니라 행의 id를 기준으로 하는 별도 저장소에 보관해서, 표가 다시
+// 그려져도(같은 id를 가진 새 <tr>가 다시 만들어져도) 사진이 안 사라지게 함.
+let _bulkRowPhotoStore = {}; // { rowId: photoDataUrl }
 
 async function openInAppCameraForRow(rowEl){
-  alert('진단: openInAppCameraForRow 실행됨, getUserMedia 호출 직전');
   _inAppCameraTarget = { rowEl };
   const msg = document.getElementById('inAppCameraMsg');
   msg.style.display = 'none';
@@ -2949,8 +2954,9 @@ async function captureInAppPhoto(){
     } else if(!gps){
       alert('위치를 가져오지 못했습니다. 좌표를 직접 입력해주세요.');
     }
-    // 표 줄의 사진 데이터는 rowEl에 직접 매달아둠(각 줄마다 별도 보관, 저장 시 이 값을 읽어감)
-    rowEl._capturedPhotoDataUrl = photoDataUrl;
+    // ⚠️ id 기준 저장소에 보관 — 표가 나중에 다시 그려져도(줄 추가 등) 안 사라짐
+    const rowId = rowEl.dataset.id;
+    if(rowId) _bulkRowPhotoStore[rowId] = photoDataUrl;
   } else {
     // 신규입력/좌표수정 단일 폼에서 호출된 경우
     const { latId, lngId, previewId } = _inAppCameraTarget;
@@ -4370,7 +4376,7 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
       const lng = parseFloat(tr.querySelector('.bn-lng').value);
       if(isNaN(lat) || isNaN(lng)){ formatErrors++; return; }
       const id = tr.dataset.id;
-      if(tr._capturedPhotoDataUrl) rowPhotoMap[id] = tr._capturedPhotoDataUrl;
+      if(_bulkRowPhotoStore[id]) rowPhotoMap[id] = _bulkRowPhotoStore[id];
       toSave.push({
         id, lat, lng,
         addr: tr.querySelector('.bn-addr').value.trim(),
@@ -4388,7 +4394,7 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 표 안 인앱 카메라로 찍은 사진이 저장은
     // 되는데 정작 업로드하는 코드가 없어서 통째로 버려지고 있었음. 저장 성공한 것만 사진도 업로드.
     results.forEach((r, idx)=>{
-      if(r.status === 'fulfilled' && rowPhotoMap[toSave[idx].id]) uploadPhotoDataUrl(toSave[idx].id, rowPhotoMap[toSave[idx].id]);
+      if(r.status === 'fulfilled' && rowPhotoMap[toSave[idx].id]){ uploadPhotoDataUrl(toSave[idx].id, rowPhotoMap[toSave[idx].id]); delete _bulkRowPhotoStore[toSave[idx].id]; }
     });
     let failCount = 0;
     results.forEach((r, idx)=>{
@@ -4890,7 +4896,7 @@ async function saveBulkEdit(){
     // rowEl._capturedPhotoDataUrl에 저장은 되는데, 정작 이 저장 과정에서 그 값을
     // 읽어가는 코드가 어디에도 없어서 사진이 통째로 버려지고 있었음. 여기서 챙겨서
     // 별도로 기억해뒀다가, 저장 성공 후 아래에서 업로드함(메인 레코드에는 안 섞음).
-    if(tr._capturedPhotoDataUrl) rowPhotoMap[id] = tr._capturedPhotoDataUrl;
+    if(_bulkRowPhotoStore[id]) rowPhotoMap[id] = _bulkRowPhotoStore[id];
     toSave.push({id, lat, lng, addr, note, region: undefined, lastEditSource:'admin'});
   });
 
@@ -4906,7 +4912,7 @@ async function saveBulkEdit(){
     const rec = toSave[i];
     if(r.status === 'fulfilled'){
       updated++;
-      if(rowPhotoMap[rec.id]) uploadPhotoDataUrl(rec.id, rowPhotoMap[rec.id]); // 저장 성공한 것만 사진도 업로드
+      if(rowPhotoMap[rec.id]){ uploadPhotoDataUrl(rec.id, rowPhotoMap[rec.id]); delete _bulkRowPhotoStore[rec.id]; } // 저장 성공한 것만 사진도 업로드
       if(markerObjs[rec.id]){
         markerObjs[rec.id].record = rec;
         markerObjs[rec.id].marker.setPosition(new kakao.maps.LatLng(rec.lat, rec.lng));
