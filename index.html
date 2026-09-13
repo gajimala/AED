@@ -2863,6 +2863,7 @@ let _inAppCameraTarget = null; // { latId, lngId, previewId }
 let _inAppCameraGpsPromise = null;
 
 async function openInAppCameraForRow(rowEl){
+  alert('진단: openInAppCameraForRow 실행됨, getUserMedia 호출 직전');
   _inAppCameraTarget = { rowEl };
   const msg = document.getElementById('inAppCameraMsg');
   msg.style.display = 'none';
