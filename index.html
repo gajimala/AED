@@ -529,7 +529,7 @@
 
     <div style="margin-top:14px;">
       <label id="reportPhotoLabel">사진 첨부 (필수)</label>
-      <input type="file" id="reportPhoto" accept="image/*" capture="environment" onclick="freeMemoryBeforeCamera()" onchange="onReportPhotoSelected(event)">
+      <input type="file" id="reportPhoto" accept="image/*" capture="environment" onclick="freeMemoryBeforeCamera(); saveReportStateBeforeCamera();" onchange="onReportPhotoSelected(event)">
       <div id="reportPhotoPreview"></div>
     </div>
 
@@ -1013,6 +1013,43 @@ async function batchPatchRecords(patches){
 /* =========================================================
    스플래시 → 지도 자동 전환
    ========================================================= */
+// ⚠️ 요청받은 개선 — 관리자 쪽엔 "카메라 전 상태 저장 → 재시작 후 복구"가 있는데, 민간
+// 제보 쪽엔 없었음. 카메라(네이티브)는 EXIF GPS 검증 때문에 그대로 유지해야 하므로,
+// 재시작 자체를 막을 순 없지만, 재시작돼도 "제보 종류/대상/입력하던 사유"는 복구되도록
+// 만들어서 처음부터 다시 시작하는 느낌을 줄임(사진은 안드로이드가 파일 선택 자체를
+// 못 돌려주므로 복구 불가 — 다시 촬영해야 함).
+function saveReportStateBeforeCamera(){
+  try{
+    const state = {
+      ts: Date.now(),
+      type: reportState.type,
+      targetId: reportState.targetId,
+      reason: document.getElementById('reportReason') ? document.getElementById('reportReason').value : '',
+    };
+    localStorage.setItem('reportStateBeforeCamera', JSON.stringify(state));
+  }catch(e){}
+}
+
+function restoreReportStateIfAny(){
+  let raw;
+  try{ raw = localStorage.getItem('reportStateBeforeCamera'); }catch(e){ return; }
+  if(!raw) return;
+  localStorage.removeItem('reportStateBeforeCamera');
+  let state;
+  try{ state = JSON.parse(raw); }catch(e){ return; }
+  if(!state || Date.now() - state.ts > 10*60*1000) return; // 10분 넘게 지난 건 복구 안 함
+
+  // loadRecords()가 끝난 뒤에 markerObjs가 채워지므로, 약간의 지연 후 시도
+  setTimeout(()=>{
+    if(state.type !== 'add' && !(markerObjs[state.targetId] || loadRecords().find(r=>r.id===state.targetId))) return; // 대상이 아예 없어졌으면 복구 포기
+    if(state.type !== 'add') currentMarkerId = state.targetId;
+    openReportFlow(state.type);
+    if(document.getElementById('reportReason')) document.getElementById('reportReason').value = state.reason || '';
+    const hint = document.getElementById('reportHint');
+    if(hint) hint.innerHTML = '📷 사진 촬영 중 화면이 새로고침되었습니다. 입력하시던 내용은 복구했으니, <b>사진만 다시 촬영</b>해주세요.';
+  }, 800);
+}
+
 window.addEventListener('load', ()=>{
   // 지도(카카오 SDK)와 무관하게 좌표 데이터는 항상 먼저 불러온다.
   // 이렇게 해야 카카오 로드가 실패해도 관리자 대량수정/엑셀 기능은 계속 쓸 수 있다.
@@ -1020,6 +1057,7 @@ window.addEventListener('load', ()=>{
     // 대시보드가 이미 열려 있었다면(드문 케이스) 표를 최신 데이터로 갱신
     if(document.getElementById('adminDash').classList.contains('show')) buildBulkEditTable();
     // (저장 완료 표시는 이제 저장 시점에만 잠깐 뜨고 사라짐 — 새로고침 간 상태 유지 불필요)
+    restoreReportStateIfAny(); // 민간 제보 중 사진 촬영으로 새로고침됐다면 입력 내용 복구
   });
 
   // 카카오 SDK 로드가 실패해도(앱키 미설정, 도메인 미등록, 네트워크 문제 등)
@@ -2489,7 +2527,15 @@ const REPORT_COPY = {
   }
 };
 
+let _lastOpenReportFlowAt = 0;
 function openReportFlow(type){
+  // ⚠️ 요청받은 개선 — 신규제보·수정요청·삭제신고 버튼 자체엔 중복 클릭 방지가 없어서,
+  // 빠르게 여러 번 누르면 이 함수가 연달아 실행될 수 있었음("몇 번 눌러야 뜬다"는 증상과
+  // 관련 있을 수 있음). 짧은 시간(500ms) 안의 재실행은 무시함.
+  const now = Date.now();
+  if(now - _lastOpenReportFlowAt < 500) return;
+  _lastOpenReportFlowAt = now;
+
   reportState = { type, targetId: (type==='add' ? null : currentMarkerId), marker:null, photoDataUrl:null, photoGPS:null };
   const submitBtn = document.getElementById('reportSubmitBtn');
   if(submitBtn){ submitBtn.dataset.submitting = 'false'; } // 새 제보 시작 시 이전 제출 잠금 상태 초기화
