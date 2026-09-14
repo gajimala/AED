@@ -2538,8 +2538,8 @@ function openReportFlow(type, skipDebounce){
   if(!skipDebounce){
     const now = Date.now();
     if(now - _lastOpenReportFlowAt < 500) return;
-    _lastOpenReportFlowAt = now;
   }
+  _lastOpenReportFlowAt = Date.now(); // 디바운스 건너뛴 경우(복구 호출)에도 항상 갱신 — 아래 closeReportSheetIfOpen의 유예시간 안전장치가 이 값에 의존하므로
 
   reportState = { type, targetId: (type==='add' ? null : currentMarkerId), marker:null, photoDataUrl:null, photoGPS:null };
   const submitBtn = document.getElementById('reportSubmitBtn');
@@ -2574,14 +2574,21 @@ function openReportFlow(type, skipDebounce){
   document.getElementById('reportMsg').style.display = 'none';
   document.getElementById('reportSubmitBtn').disabled = true;
 
-  closeMarkerSheet();
-  document.getElementById('reportOverlay').classList.add('show');
-
-  // 삭제신고인 경우, 기존 등록 좌표를 참고 표시용으로 미리 보여줌(이동은 그대로 자유)
-  if(type==='delete' && markerObjs[currentMarkerId]){
-    const rec = markerObjs[currentMarkerId].record;
+  // ⚠️ 진짜 원인이었을 가능성이 높음(지피티 검토로 발견, 검증해서 반영) — 삭제신고일 때
+  // placeReportMarker()가 map.setCenter()/setLevel()을 호출하는데, 이게 지도의
+  // dragstart/zoom_start 이벤트를 유발할 수 있음. 그런데 그 이벤트 리스너들이
+  // closeReportSheetIfOpen()을 실행해서, 방금 연 삭제신고 창을 스스로 닫아버리는
+  // 충돌이 있었음("기존 박스는 닫히는데 새 팝업이 안 뜬다"는 증상과 정확히 일치).
+  // 오버레이를 열기 전에 지도 이동을 먼저 끝내면, 그 시점엔 아직 닫을 대상이 없어서
+  // 문제가 안 생김. currentMarkerId 대신 이 함수 시작부에서 이미 고정해둔
+  // reportState.targetId를 써서 더 안전하게 함.
+  if(type==='delete' && reportState.targetId && markerObjs[reportState.targetId]){
+    const rec = markerObjs[reportState.targetId].record;
     placeReportMarker(rec.lat, rec.lng);
   }
+
+  closeMarkerSheet();
+  document.getElementById('reportOverlay').classList.add('show');
 }
 
 function closeReportFlow(){
@@ -2592,6 +2599,10 @@ function closeReportFlow(){
 // 지도 이동 등으로 자동 닫을 때 쓰는 안전한 버전 — 원래 열려있던 상태일 때만 실제로 닫음
 // (안 열려있는데 무작정 호출하면 reportState가 불필요하게 초기화될 수 있어서 방지함)
 function closeReportSheetIfOpen(){
+  // ⚠️ 추가 안전장치 — 순서를 바꿔서 대부분 해결됐겠지만, 혹시 모를 타이밍 문제에 대비해
+  // 팝업을 연 직후 아주 짧은 시간(300ms) 동안은 지도 이동으로 인한 자동 닫기를 무시함
+  // (그 시점의 지도 이동은 사용자가 아니라 placeReportMarker의 프로그램적 이동일 가능성이 높음).
+  if(Date.now() - _lastOpenReportFlowAt < 300) return;
   if(document.getElementById('reportOverlay').classList.contains('show')) closeReportFlow();
 }
 
