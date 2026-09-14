@@ -1043,7 +1043,7 @@ function restoreReportStateIfAny(){
   setTimeout(()=>{
     if(state.type !== 'add' && !(markerObjs[state.targetId] || loadRecords().find(r=>r.id===state.targetId))) return; // 대상이 아예 없어졌으면 복구 포기
     if(state.type !== 'add') currentMarkerId = state.targetId;
-    openReportFlow(state.type);
+    openReportFlow(state.type, true);
     if(document.getElementById('reportReason')) document.getElementById('reportReason').value = state.reason || '';
     const hint = document.getElementById('reportHint');
     if(hint) hint.innerHTML = '📷 사진 촬영 중 화면이 새로고침되었습니다. 입력하시던 내용은 복구했으니, <b>사진만 다시 촬영</b>해주세요.';
@@ -1385,7 +1385,7 @@ function startMyLocationTracking(){
     (pos)=>{
       const p = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
       if(!myLocationMarker){
-        myLocationMarker = new kakao.maps.Marker({ position:p, map, image:dotIcon, zIndex:30 });
+        myLocationMarker = new kakao.maps.Marker({ position:p, map, image:dotIcon, zIndex:5 }); // ⚠️ 30이었는데, 구조함 마커(10)보다 낮춰서 겹쳐도 구조함 클릭이 가능하게 함(내 위치 점은 순수 정보용이라 클릭 우선순위 안 필요)
       } else {
         myLocationMarker.setPosition(p); // 위치만 갱신, 지도는 안 움직임(팬/줌 유지)
       }
@@ -2330,7 +2330,7 @@ function pickLifesaverIcon(rec){
 
 function buildMarker(rec){
   const pos = new kakao.maps.LatLng(rec.lat, rec.lng);
-  const marker = new kakao.maps.Marker({ position: pos, image: pickLifesaverIcon(rec) }); // map은 지정 안 함 — 클러스터러가 관리
+  const marker = new kakao.maps.Marker({ position: pos, image: pickLifesaverIcon(rec), zIndex: 10 }); // ⚠️ 진짜 원인이었음(사용자가 발견함) — 내 위치 점(zIndex:30)이 이 마커보다 항상 위에 있어서, 겹치면 클릭을 가로챘음
   kakao.maps.event.addListener(marker, 'click', ()=>openMarkerSheet(rec.id));
   kakao.maps.event.addListener(marker, 'dragend', ()=>{
     const p = marker.getPosition();
@@ -2528,13 +2528,18 @@ const REPORT_COPY = {
 };
 
 let _lastOpenReportFlowAt = 0;
-function openReportFlow(type){
+function openReportFlow(type, skipDebounce){
   // ⚠️ 요청받은 개선 — 신규제보·수정요청·삭제신고 버튼 자체엔 중복 클릭 방지가 없어서,
   // 빠르게 여러 번 누르면 이 함수가 연달아 실행될 수 있었음("몇 번 눌러야 뜬다"는 증상과
   // 관련 있을 수 있음). 짧은 시간(500ms) 안의 재실행은 무시함.
-  const now = Date.now();
-  if(now - _lastOpenReportFlowAt < 500) return;
-  _lastOpenReportFlowAt = now;
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 자동 복구 기능(restoreReportStateIfAny)도
+  // 이 함수를 호출하는데, 그게 이 잠금을 걸어버려서 바로 직후에 사용자가 진짜로 버튼을
+  // 눌러도 무시당하는 문제가 있었음. 복구 호출은 skipDebounce=true로 이 잠금을 건너뜀.
+  if(!skipDebounce){
+    const now = Date.now();
+    if(now - _lastOpenReportFlowAt < 500) return;
+    _lastOpenReportFlowAt = now;
+  }
 
   reportState = { type, targetId: (type==='add' ? null : currentMarkerId), marker:null, photoDataUrl:null, photoGPS:null };
   const submitBtn = document.getElementById('reportSubmitBtn');
