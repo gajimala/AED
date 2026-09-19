@@ -383,7 +383,7 @@
   <div class="ring"></div>
   <h1>인명구조함 지도</h1>
   <p>카카오맵 불러오는 중…</p>
-  <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작:</div>
+  <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작: </div>
 </div>
 
 <!-- 지도 -->
@@ -1158,7 +1158,11 @@ async function initMap(){
     // 마커가 몇 개 있든(30개 규칙은 addMarkers를 호출할지 말지로 이미 따로 걸러짐) 클러스터러
     // 안에 들어간 마커는 항상 정상적으로 묶일 수 있게 함.
     minLevel: 1,
-    gridSize: 120,
+    // ⚠️ 진짜 원인이었음(사용자가 발견함, 계산으로 확인) — gridSize는 줌 레벨과 상관없이
+    // 항상 고정된 "화면 픽셀" 거리인데, 축척이 넓어지면(250m 등) 같은 120픽셀이라도 실제
+    // 거리로는 최대 77m까지 벌어져서, 사용자가 "근처"라고 느끼는 범위보다 훨씬 넓게 묶여
+    // 숫자가 부풀려 보이는 문제가 있었음. 60으로 줄여서 묶이는 실제 거리 자체를 절반으로 줄임.
+    gridSize: 60,
     disableClickZoom: false,
     calculator: [10, 50, 100],
     // ⚠️ 색깔만으로 인명구조함 클러스터(원형)와 구별하면 색맹이거나 화면이 어두운 환경에서
@@ -1427,20 +1431,64 @@ function coord2RegionName(lat, lng){
 }
 
 // 좌표 하나로 "행정구역(필터용)"과 "전체 주소(화면 표시용)"를 한 번에 가져옴 — API 호출 절약
+// ⚠️ 진짜 원인이었음(사용자가 발견함) — 해변가·방파제처럼 정확한 지번 주소가 없는 좌표는
+// coord2Address가 실패해서 무조건 "기타"로 처리되고 있었음. 이미 위도/경도는 갖고 있는데도
+// 시/도조차 판단하려는 시도가 없었음. 3단계로 재설계함:
+//   1) coord2Address(기존) — 성공하면 정확한 주소+시/도+시/군/구까지 얻음
+//   2) coord2RegionCode — 지번 주소는 없어도 행정구역 코드는 잡히는 경우가 있음(별도 API)
+//   3) 위경도 범위표 — 그것도 실패하면 좌표 범위로 최소한 시/도만이라도 판정(완전한 마지막 보루)
 function coord2RegionAndAddress(lat, lng){
   return new Promise(resolve=>{
     geocoder.coord2Address(lng, lat, (result, status)=>{
       if(status === kakao.maps.services.Status.OK && result.length){
-        const a = result[0].address;               // 지번 주소 기준
-        const road = result[0].road_address;        // 도로명 주소(있으면 이걸 우선 사용)
+        const a = result[0].address;
+        const road = result[0].road_address;
         const region = a ? `${a.region_1depth_name} ${a.region_2depth_name}` : '기타';
         const addr = (road && road.address_name) ? road.address_name : (a ? a.address_name : '');
         resolve({ region, addr });
-      } else {
-        resolve({ region:'기타', addr:'' });
+        return;
       }
+      // 1단계 실패 — 2단계(행정구역 코드)로 재시도
+      // ⚠️ 혹시 이 메서드가 없는 SDK 버전/설정이면 함수 호출 자체가 에러를 던질 수 있어서,
+      // 미리 존재 여부를 확인하고 없으면 곧바로 3단계(위경도 범위)로 안전하게 넘어감
+      if(typeof geocoder.coord2RegionCode !== 'function'){
+        resolve({ region: estimateSidoByLatLng(lat, lng), addr: '' });
+        return;
+      }
+      geocoder.coord2RegionCode(lng, lat, (result2, status2)=>{
+        if(status2 === kakao.maps.services.Status.OK && result2.length){
+          // 법정동(B) 기준을 우선 사용(행정동보다 좀 더 안정적으로 넓게 잡히는 경향)
+          const found = result2.find(r=>r.region_type==='B') || result2[0];
+          const region = `${found.region_1depth_name} ${found.region_2depth_name}`;
+          resolve({ region, addr: '' }); // 주소 자체는 여전히 없음(정상 — 해안가 등)
+          return;
+        }
+        // 2단계도 실패 — 마지막 보루: 위경도 범위로 시/도만이라도 판정
+        resolve({ region: estimateSidoByLatLng(lat, lng), addr: '' });
+      });
     });
   });
+}
+
+// 카카오 API가 둘 다 실패했을 때 쓰는 마지막 보루 — 대한민국 각 시/도의 대략적인
+// 위경도 사각 범위. 정밀하지 않지만(경계가 딱 떨어지지 않음), "기타"보다는 훨씬 유용함.
+// 겹치는 범위가 있을 수 있어 순서대로 먼저 맞는 것을 채택함(더 좁은/특수한 지역을 앞에 둠).
+const SIDO_BOUNDING_BOXES = [
+  { name:'제주특별자치도', latMin:33.0, latMax:33.6, lngMin:126.0, lngMax:127.0 },
+  { name:'인천광역시',   latMin:37.0, latMax:37.9, lngMin:124.5, lngMax:126.8 },
+  { name:'부산광역시',   latMin:34.9, latMax:35.4, lngMin:128.8, lngMax:129.3 },
+  { name:'울산광역시',   latMin:35.3, latMax:35.7, lngMin:129.2, lngMax:129.5 },
+  { name:'강원특별자치도', latMin:37.0, latMax:38.7, lngMin:127.5, lngMax:129.5 },
+  { name:'경상북도',    latMin:35.6, latMax:37.0, lngMin:128.3, lngMax:129.6 },
+  { name:'경상남도',    latMin:34.7, latMax:35.7, lngMin:127.5, lngMax:129.0 },
+  { name:'전라북도',    latMin:35.4, latMax:36.2, lngMin:126.3, lngMax:127.5 },
+  { name:'전라남도',    latMin:33.9, latMax:35.5, lngMin:125.8, lngMax:127.7 },
+  { name:'충청남도',    latMin:35.9, latMax:37.1, lngMin:125.9, lngMax:127.4 },
+  { name:'경기도',      latMin:36.9, latMax:38.3, lngMin:126.3, lngMax:127.9 },
+];
+function estimateSidoByLatLng(lat, lng){
+  const hit = SIDO_BOUNDING_BOXES.find(b => lat>=b.latMin && lat<=b.latMax && lng>=b.lngMin && lng<=b.lngMax);
+  return hit ? hit.name : '기타'; // 그래도 못 찾으면(범위 밖) 어쩔 수 없이 기타 유지
 }
 
 let _classifyInProgress = false; // 관리자가 여러 액션을 연달아 하면 매번 이 함수가 다시 불리는데, 이미 돌고 있으면 또 시작하지 않게 막음(저장 충돌 방지)
