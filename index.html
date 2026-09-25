@@ -3243,10 +3243,19 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
 // 핵심인 구조함 등록/수정 자체를 막으면 안 되므로).
 async function uploadPhotoDataUrl(id, photoDataUrl){
   try{
-    await fetch(`${WORKER_URL}/lifesaver-photo/${id}`, {
+    // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — fetch()는 서버가 400/500 같은
+    // 에러를 응답해도 예외를 던지지 않음(네트워크 자체가 끊긴 경우만 예외를 던짐). 그래서
+    // 예전 코드는 서버가 "사진이 너무 큽니다" 같은 이유로 거부해도 그걸 확인 안 하고 그냥
+    // 넘어가서, 사진이 조용히 등록 안 되는 문제가 있었을 수 있음. 응답 상태를 직접 확인해서
+    // 실패 이유를 콘솔에 남기게 함.
+    const res = await fetch(`${WORKER_URL}/lifesaver-photo/${id}`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ photoDataUrl })
     });
+    if(!res.ok){
+      const errText = await res.text().catch(()=>'');
+      console.error(`사진 업로드 실패(구조함 저장 자체는 정상 완료됨) — HTTP ${res.status}: ${errText}`);
+    }
   }catch(e){ console.warn('사진 업로드 실패(구조함 저장 자체는 정상 완료됨):', e); }
 }
 async function uploadAdminPhotoIfAny(id, latId){
@@ -4592,9 +4601,17 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     });
     // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 표 안 인앱 카메라로 찍은 사진이 저장은
     // 되는데 정작 업로드하는 코드가 없어서 통째로 버려지고 있었음. 저장 성공한 것만 사진도 업로드.
-    results.forEach((r, idx)=>{
-      if(r.status === 'fulfilled' && rowPhotoMap[toSave[idx].id]){ uploadPhotoDataUrl(toSave[idx].id, rowPhotoMap[toSave[idx].id]); delete _bulkRowPhotoStore[toSave[idx].id]; }
-    });
+    // ⚠️ 진짜 원인이었을 가능성이 높음(사용자가 발견함) — 사진 업로드를 await 없이
+    // 그냥 호출만 하고 있어서, 이 흐름이 끝나버리면 사진 업로드가 채 끝나기도 전에
+    // 취소/무시될 위험이 있었음. 전부 끝날 때까지 기다리게 함.
+    await Promise.all(results.map((r, idx)=>{
+      if(r.status === 'fulfilled' && rowPhotoMap[toSave[idx].id]){
+        const p = uploadPhotoDataUrl(toSave[idx].id, rowPhotoMap[toSave[idx].id]);
+        delete _bulkRowPhotoStore[toSave[idx].id];
+        return p;
+      }
+      return Promise.resolve();
+    }));
     let failCount = 0;
     results.forEach((r, idx)=>{
       if(r.status==='rejected'){
@@ -5126,11 +5143,12 @@ async function saveBulkEdit(){
     if(btn) btn.textContent = `저장 중… (${done}/${total})`;
   });
   let updated = 0, saveErrors = 0;
+  const photoUploads = []; // ⚠️ 같은 이유(대량입력과 동일) — 끝날 때까지 기다리게 모아둠
   results.forEach((r, i) => {
     const rec = toSave[i];
     if(r.status === 'fulfilled'){
       updated++;
-      if(rowPhotoMap[rec.id]){ uploadPhotoDataUrl(rec.id, rowPhotoMap[rec.id]); delete _bulkRowPhotoStore[rec.id]; } // 저장 성공한 것만 사진도 업로드
+      if(rowPhotoMap[rec.id]){ photoUploads.push(uploadPhotoDataUrl(rec.id, rowPhotoMap[rec.id])); delete _bulkRowPhotoStore[rec.id]; }
       if(markerObjs[rec.id]){
         markerObjs[rec.id].record = rec;
         markerObjs[rec.id].marker.setPosition(new kakao.maps.LatLng(rec.lat, rec.lng));
@@ -5142,6 +5160,7 @@ async function saveBulkEdit(){
       saveErrors++;
     }
   });
+  await Promise.all(photoUploads); // 모든 사진 업로드가 실제로 끝날 때까지 기다림
   clusterer.redraw();
   if(updated>0){
     classifyMissingRegions();
