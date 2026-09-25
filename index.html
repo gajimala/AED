@@ -3011,14 +3011,7 @@ async function openInAppCameraForRow(rowEl){
   const msg = document.getElementById('inAppCameraMsg');
   msg.style.display = 'none';
 
-  _inAppCameraGpsPromise = new Promise((resolve)=>{
-    if(!navigator.geolocation){ resolve(null); return; }
-    navigator.geolocation.getCurrentPosition(
-      (pos)=>resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      ()=>resolve(null),
-      { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
-    );
-  });
+  _inAppCameraGpsPromise = getBestAvailableLocation();
 
   try{
     _inAppCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -3029,14 +3022,30 @@ async function openInAppCameraForRow(rowEl){
   }
 }
 
-async function openInAppCamera(latId, lngId, previewId){
-  _inAppCameraTarget = { latId, lngId, previewId };
-  const msg = document.getElementById('inAppCameraMsg');
-  msg.style.display = 'none';
+let _pendingNativeLocationResolve = null;
 
-  // 카메라 화면을 여는 것과 동시에 GPS 조회도 병렬로 시작(촬영 버튼 누를 때까지 기다리는
-  // 동안 위치 확인이 끝나있을 가능성이 높아 체감 대기시간이 줄어듦)
-  _inAppCameraGpsPromise = new Promise((resolve)=>{
+// ⚠️ 네이티브(MainActivity.kt)가 인앱 카메라용으로 위치를 조회해준 뒤 호출하는 함수.
+// 못 찾았으면 null, null로 호출됨. 네이티브 브릿지가 없는 일반 브라우저에서는 이 함수 자체가
+// 절대 호출되지 않으므로(안전) 아무 영향 없음.
+window.onNativeCurrentLocation = function(lat, lng){
+  if(_pendingNativeLocationResolve){
+    _pendingNativeLocationResolve((lat != null && lng != null) ? { lat, lng } : null);
+  }
+};
+
+// 인앱 카메라(getUserMedia)로 찍은 사진은 EXIF가 없으므로, 촬영 시점의 위치를 이 함수로
+// 별도로 받아옴. 네이티브 앱 안에서 실행 중이면 안드로이드 자체 위치 조회를 우선 쓰고
+// (별도 브라우저 권한 팝업 없이 더 빠르고 안정적), 없으면(일반 웹브라우저) 표준 웹
+// geolocation API로 대체함.
+function getBestAvailableLocation(){
+  if(window.AndroidBlobDownloader && typeof window.AndroidBlobDownloader.requestCurrentLocationNative === 'function'){
+    return new Promise((resolve)=>{
+      _pendingNativeLocationResolve = resolve;
+      setTimeout(()=>resolve(null), 5000); // 네이티브가 응답 안 하면 5초 후 포기(무한 대기 방지)
+      window.AndroidBlobDownloader.requestCurrentLocationNative();
+    });
+  }
+  return new Promise((resolve)=>{
     if(!navigator.geolocation){ resolve(null); return; }
     navigator.geolocation.getCurrentPosition(
       (pos)=>resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
@@ -3044,6 +3053,16 @@ async function openInAppCamera(latId, lngId, previewId){
       { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
     );
   });
+}
+
+async function openInAppCamera(latId, lngId, previewId){
+  _inAppCameraTarget = { latId, lngId, previewId };
+  const msg = document.getElementById('inAppCameraMsg');
+  msg.style.display = 'none';
+
+  // 카메라 화면을 여는 것과 동시에 GPS 조회도 병렬로 시작(촬영 버튼 누를 때까지 기다리는
+  // 동안 위치 확인이 끝나있을 가능성이 높아 체감 대기시간이 줄어듦)
+  _inAppCameraGpsPromise = getBestAvailableLocation();
 
   try{
     _inAppCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -3118,25 +3137,31 @@ async function captureInAppPhoto(){
   closeInAppCamera();
 }
 
-function useCurrentLocationDirect(latId, lngId, btn){
-  if(!navigator.geolocation){ alert('이 기기에서 위치 기능을 지원하지 않습니다.'); return; }
+async function useCurrentLocationDirect(latId, lngId, btn){
   const latInput = document.getElementById(latId), lngInput = document.getElementById(lngId);
   const originalText = btn ? btn.textContent : '';
   if(btn){ btn.textContent = '위치 확인 중…'; btn.disabled = true; }
-  navigator.geolocation.getCurrentPosition(
-    (pos)=>{
-      latInput.value = pos.coords.latitude.toFixed(6);
-      lngInput.value = pos.coords.longitude.toFixed(6);
-      if(latId === 'newLat') onNewLatLngTyped(); // 신규입력 화면은 지도 위 아이콘도 같이 옮김
-      if(btn){ btn.textContent = originalText; btn.disabled = false; }
-    },
-    (err)=>{
-      alert('현재 위치를 가져오지 못했습니다: ' + err.message);
-      if(btn){ btn.textContent = originalText; btn.disabled = false; }
-    },
-    { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
-  );
+  const loc = await getBestAvailableLocation();
+  if(loc){
+    latInput.value = loc.lat.toFixed(6);
+    lngInput.value = loc.lng.toFixed(6);
+    if(latId === 'newLat') onNewLatLngTyped(); // 신규입력 화면은 지도 위 아이콘도 같이 옮김
+  } else {
+    alert('현재 위치를 가져오지 못했습니다.');
+  }
+  if(btn){ btn.textContent = originalText; btn.disabled = false; }
 }
+
+let _pendingNativeGpsResolve = null; // handleAdminPhotoCapture가 네이티브 GPS 응답을 기다릴 때 씀
+
+// ⚠️ 네이티브(MainActivity.kt)가 갤러리 사진에서 직접 GPS를 추출한 뒤 호출하는 함수.
+// 위도/경도를 못 찾았으면 null, null로 호출됨. 네이티브 브릿지가 없는 일반 브라우저에서는
+// 이 함수 자체가 절대 호출되지 않으므로(안전) 아무 영향 없음.
+window.onNativeGpsExtracted = function(lat, lng){
+  if(_pendingNativeGpsResolve){
+    _pendingNativeGpsResolve((lat != null && lng != null) ? { lat, lng } : null);
+  }
+};
 
 function handleAdminPhotoCapture(file, latId, lngId, previewId){
   if(!file) return;
@@ -3171,9 +3196,25 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
   });
 
   const gpsPromise = new Promise((resolve)=>{
+    // ⚠️ 새로 추가 — 갤러리 사진은 안드로이드가 GPS를 지워서 넘겨주므로, 이 자바스크립트
+    // 자체 파싱(parseExifGPS)은 실패할 수 있음. 네이티브 코드(MainActivity.kt)가 원본에서
+    // 직접 GPS를 뽑아서 window.onNativeGpsExtracted(위도,경도)로 알려주는 것을 기다렸다가,
+    // 자바스크립트 파싱이 실패했는데 네이티브가 성공했으면 그 결과를 대신 사용함.
+    // 네이티브 브릿지가 없는 환경(일반 브라우저 등)에서는 1.5초 뒤 포기하고 자바스크립트
+    // 결과만으로 진행함(무한 대기 방지).
+    _pendingNativeGpsResolve = null;
+    const nativeGpsPromise = new Promise((res)=>{
+      _pendingNativeGpsResolve = res;
+      setTimeout(()=>res(null), 1500);
+    });
+
     const reader = new FileReader();
-    reader.onload = (e)=>{
-      const gps = parseExifGPS(e.target.result);
+    reader.onload = async (e)=>{
+      const jsGps = parseExifGPS(e.target.result);
+      const nativeGps = await nativeGpsPromise; // 네이티브 결과 기다림(또는 1.5초 타임아웃)
+      _pendingNativeGpsResolve = null;
+      const gps = jsGps || nativeGps; // 자바스크립트가 못 찾았으면 네이티브 결과로 대체
+
       const badge = document.createElement('div');
       if(gps){
         document.getElementById(latId).value = gps.lat.toFixed(6);
@@ -4955,8 +4996,18 @@ function handleBulkRowPhotoCapture(inputEl, rowEl){
   saveBulkTableStateBeforeCamera(rowEl);
 
   const reader = new FileReader();
-  reader.onload = (e)=>{
-    const gps = parseExifGPS(e.target.result);
+  reader.onload = async (e)=>{
+    const jsGps = parseExifGPS(e.target.result);
+    // ⚠️ 같은 이유로(갤러리 사진은 GPS가 지워짐) 네이티브 결과도 같이 기다림
+    _pendingNativeGpsResolve = null;
+    const nativeGpsPromise = new Promise((res)=>{
+      _pendingNativeGpsResolve = res;
+      setTimeout(()=>res(null), 1500);
+    });
+    const nativeGps = await nativeGpsPromise;
+    _pendingNativeGpsResolve = null;
+    const gps = jsGps || nativeGps;
+
     const latInput = rowEl.querySelector('.be-lat, .bn-lat');
     const lngInput = rowEl.querySelector('.be-lng, .bn-lng');
     if(gps && latInput && lngInput){
