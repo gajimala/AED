@@ -12,6 +12,7 @@
 -->
 <script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=d02572eca2dd38bbbbb6692254d51bb7&autoload=false&libraries=services,clusterer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
 <style>
   :root{
@@ -3163,6 +3164,30 @@ window.onNativeGpsExtracted = function(lat, lng){
   }
 };
 
+// ⚠️ 새로 추가 — 대부분의 안드로이드 웹뷰/브라우저는 <img> 태그로 HEIC/HEIF 파일을
+// 디코딩하지 못함(사용자가 실제로 겪음: GPS는 정상 추출되는데 썸네일만 "처리 중"에서
+// 안 넘어가고 사진 자체가 등록에 안 붙었음). heic2any로 먼저 JPEG로 변환해서 이 문제를
+// 근본적으로 없앰. 변환에 실패해도(라이브러리 로딩 실패 등) 원본으로 그대로 시도함.
+function isHeicFile(file){
+  const type = (file.type||'').toLowerCase();
+  const name = (file.name||'').toLowerCase();
+  return type.includes('heic') || type.includes('heif') || name.endsWith('.heic') || name.endsWith('.heif');
+}
+async function toThumbnailSourceFile(file){
+  if(!isHeicFile(file)) return file;
+  if(typeof heic2any !== 'function'){
+    console.warn('heic2any 로딩 안 됨 — HEIC 원본으로 시도(썸네일 실패 가능)');
+    return file;
+  }
+  try{
+    const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.7 });
+    return Array.isArray(converted) ? converted[0] : converted;
+  }catch(e){
+    console.warn('HEIC → JPEG 변환 실패 — 원본으로 시도(썸네일 실패 가능)', e);
+    return file;
+  }
+}
+
 function handleAdminPhotoCapture(file, latId, lngId, previewId){
   if(!file) return;
   const preview = document.getElementById(previewId);
@@ -3176,24 +3201,34 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
   // 추출이 채 끝나기도 전에 입력칸이 비어있는 상태로 저장돼버렸음(빈 값이 0으로 처리됨).
   // 이제 "썸네일 생성"과 "GPS 추출" 둘 다 끝나야만 이 약속이 풀리게(Promise.all) 만들어서,
   // 저장 버튼이 정말로 둘 다 기다리게 함.
-  const thumbnailPromise = new Promise((resolve)=>{
-    const imgUrl = URL.createObjectURL(file);
-    const imgEl = new Image();
-    imgEl.onload = ()=>{
-      const maxW = 480;
-      const scale = Math.min(1, maxW / imgEl.width);
-      const canvas = document.createElement('canvas');
-      canvas.width = imgEl.width * scale;
-      canvas.height = imgEl.height * scale;
-      canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
-      _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
-      if(thumbEl) thumbEl.outerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
-      URL.revokeObjectURL(imgUrl);
-      resolve();
-    };
-    imgEl.onerror = ()=>resolve(); // 썸네일 실패해도 GPS 추출까지 막지 않음(사진 없이도 좌표는 쓸 수 있게)
-    imgEl.src = imgUrl;
-  });
+  const thumbnailPromise = (async ()=>{
+    const srcFile = await toThumbnailSourceFile(file); // HEIC면 먼저 JPEG로 변환 시도
+    return new Promise((resolve)=>{
+      const imgUrl = URL.createObjectURL(srcFile);
+      const imgEl = new Image();
+      imgEl.onload = ()=>{
+        const maxW = 480;
+        const scale = Math.min(1, maxW / imgEl.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = imgEl.width * scale;
+        canvas.height = imgEl.height * scale;
+        canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+        _adminPhotoDataUrl[latId] = canvas.toDataURL('image/jpeg', 0.6);
+        if(thumbEl) thumbEl.outerHTML = `<img src="${_adminPhotoDataUrl[latId]}" style="max-width:160px;border-radius:8px;">`;
+        URL.revokeObjectURL(imgUrl);
+        resolve();
+      };
+      // ⚠️ 수정 — 예전엔 여기서 화면 문구를 안 바꾸고 조용히 resolve()만 해서, 디코딩에
+      // 실패하면(HEIC 등) "사진 처리 중…"이 영구히 남고 사진도 없이 등록되는데 사용자는
+      // 그 사실을 알 방법이 없었음. 이제 실패를 화면에 명시적으로 보여줌.
+      imgEl.onerror = ()=>{
+        if(thumbEl) thumbEl.outerHTML = '<div class="hint" style="color:#c0392b;">⚠️ 사진 미리보기 실패(형식 미지원) — 등록은 GPS만 반영되고 사진은 첨부되지 않습니다</div>';
+        URL.revokeObjectURL(imgUrl);
+        resolve();
+      };
+      imgEl.src = imgUrl;
+    });
+  })();
 
   const gpsPromise = new Promise((resolve)=>{
     // ⚠️ 새로 추가 — 갤러리 사진은 안드로이드가 GPS를 지워서 넘겨주므로, 이 자바스크립트
@@ -4238,7 +4273,7 @@ function renderReqCard(r, actionable){
       ${r.photoDataUrl ? `<img src="${r.photoDataUrl}">` : ''}
       <div class="req-meta">
         <b>${TYPE_LABEL[r.type]||r.type}</b> · ${sourceBadge} · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
-        <b>대상</b>: ${r.addr || '(주소 미입력)'} ${r.region ? `· ${r.region}` : ''}<br>
+        <b>대상</b>: ${(r.addr || '(주소 미입력)').replace(/</g,'&lt;')} ${r.region ? `· ${(r.region+'').replace(/</g,'&lt;')}` : ''}<br>
         ${coordLine}<br>
         <b>사유</b>: ${(r.reason||'').replace(/</g,'&lt;')}<br>
         ${gpsLine || dist ? `<b>${gpsLine}</b> ${gpsLine && dist ? '· ' : ''}${dist}<br>` : ''}
@@ -5012,6 +5047,13 @@ function handleBulkRowPhotoCapture(inputEl, rowEl){
   // 있는 모든 줄의 내용을 미리 저장해둠 — 재시작되면 관리자 로그인 후 자동으로 복구됨.
   saveBulkTableStateBeforeCamera(rowEl);
 
+  // ⚠️ 진짜 버그였던 부분(전수 재검토 중 발견) — 이 경로(표의 "📷 사진 선택")는 예전엔
+  // GPS만 뽑고 사진 자체(_bulkRowPhotoStore)는 전혀 저장하지 않아서, 대량입력/대량수정
+  // 표에서 갤러리로 사진을 고르면 좌표만 채워지고 사진은 등록 시 통째로 빠졌음(인앱
+  // 카메라(📸) 경로만 정상 동작했음). 인앱 카메라 경로와 동일하게 rowId 기준으로
+  // _bulkRowPhotoStore에 저장하도록 맞춤.
+  const rowId = rowEl.dataset.id;
+
   const reader = new FileReader();
   reader.onload = async (e)=>{
     const jsGps = parseExifGPS(e.target.result);
@@ -5030,13 +5072,35 @@ function handleBulkRowPhotoCapture(inputEl, rowEl){
     if(gps && latInput && lngInput){
       latInput.value = gps.lat.toFixed(6);
       lngInput.value = gps.lng.toFixed(6);
-      rowEl.style.background = '#EAF7EE'; // 잠깐 초록빛으로 반짝여서 반영됐음을 알림
-      setTimeout(()=>{ rowEl.style.background = ''; }, 1200);
     } else if(!gps){
       alert('사진에서 위치정보(GPS)를 찾지 못했습니다.');
     }
   };
   reader.readAsArrayBuffer(file);
+
+  // GPS 추출과는 별개로(둘 다 끝나야 할 필요 없이) 썸네일/저장용 사진 데이터도 만듦.
+  (async ()=>{
+    const srcFile = await toThumbnailSourceFile(file); // HEIC면 먼저 JPEG로 변환 시도
+    const imgUrl = URL.createObjectURL(srcFile);
+    const imgEl = new Image();
+    imgEl.onload = ()=>{
+      const maxW = 480;
+      const scale = Math.min(1, maxW / imgEl.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = imgEl.width * scale;
+      canvas.height = imgEl.height * scale;
+      canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+      if(rowId) _bulkRowPhotoStore[rowId] = canvas.toDataURL('image/jpeg', 0.6);
+      rowEl.style.background = '#EAF7EE'; // 잠깐 초록빛으로 반짝여서 사진이 반영됐음을 알림
+      setTimeout(()=>{ rowEl.style.background = ''; }, 1200);
+      URL.revokeObjectURL(imgUrl);
+    };
+    imgEl.onerror = ()=>{
+      URL.revokeObjectURL(imgUrl);
+      alert('사진 미리보기/저장에 실패했습니다(형식 미지원) — 위치 좌표만 반영되고 사진은 첨부되지 않습니다.');
+    };
+    imgEl.src = imgUrl;
+  })();
 }
 
 // 대량수정/대량입력 표에서 카메라 열기 직전, 지금 표에 있는 모든 줄의 값을 저장해둠
