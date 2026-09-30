@@ -2529,12 +2529,17 @@ function deleteRequestEntry(id){
     });
 }
 // 관리자가 화면에서 직접 신규/수정/삭제할 때도 이력에 자동 기록(승인 절차 없이 바로 approved 상태로)
-function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, reason){
+// ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 관리자가 신규입력/좌표수정에서 사진을 첨부하면
+// 실제 레코드(지도 마커)엔 사진이 정상 업로드되는데, 변경이력에 남기는 이 함수는 항상
+// photoDataUrl을 null로 고정해서 넣고 있었음. 그래서 등록/수정 자체는 사진 포함해서 잘
+// 되는데, 변경이력 카드에서만 사진이 영원히 안 보였음. 호출부에서 실제 사진을 넘기면
+// 그걸 이력에도 같이 남기도록 파라미터를 추가함.
+function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, reason, photoDataUrl){
   upsertRequestEntry({
     id: newId(), type, targetId,
     addr: addr||'', oldLat: oldLat??null, oldLng: oldLng??null, newLat: newLat??null, newLng: newLng??null,
     reason: reason || '관리자 직접 작업', source:'admin', org: currentAdminOrg,
-    photoDataUrl: null, photoGPS: null, distance: null,
+    photoDataUrl: photoDataUrl || null, photoGPS: null, distance: null,
     submittedAt: Date.now(), resolvedAt: Date.now(), status: 'approved'
   });
 }
@@ -3873,7 +3878,7 @@ async function saveEditCoord(){
     // 여기서는 화면 마커·이력을 건드리지 않고 그대로 종료함(입력값은 남겨서 재시도 가능하게 함).
     return;
   }
-  logAdminChange('edit', rec.id, addr||before.addr, before.lat, before.lng, lat, lng, '관리자 좌표 직접수정');
+  logAdminChange('edit', rec.id, addr||before.addr, before.lat, before.lng, lat, lng, '관리자 좌표 직접수정', _adminPhotoDataUrl.editLat);
   markerObjs[currentMarkerId].record = rec;
   markerObjs[currentMarkerId].marker.setPosition(new kakao.maps.LatLng(lat,lng));
   markerObjs[currentMarkerId].marker.setImage(pickLifesaverIcon(rec)); // 옅은 주황(관리자 수정)으로 즉시 갱신
@@ -4543,7 +4548,7 @@ async function addSingle(){
     msg.textContent='저장에 실패했습니다. 위 알림을 확인하고 다시 시도해주세요.'; msg.className='msg err'; msg.style.display='block';
     return;
   }
-  logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력');
+  logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력', _adminPhotoDataUrl.newLat);
   classifyMissingRegions();
   uploadAdminPhotoIfAny(rec.id, 'newLat'); // 사진을 찍었으면 방금 만들어진 id로 업로드(실패해도 등록 자체엔 영향 없음)
   document.getElementById('newPhotoPreview').innerHTML = '';
