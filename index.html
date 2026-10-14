@@ -2617,7 +2617,9 @@ function openReportFlow(type, skipDebounce){
   }
 
   document.getElementById('reportCoordDisplay').style.display = 'none';
-  document.getElementById('reportPhoto').value = '';
+  // ⚠️ 진짜 내 실수였음 — reportPhoto input을 버튼으로 바꾸면서, 그 input을 초기화하던
+  // 이 줄을 지우는 걸 깜빡해서 매번 여기서 에러 나며 함수 전체가 멈췄음(민간 제보가
+  // 완전히 막혔던 진짜 원인).
   document.getElementById('reportPhotoPreview').innerHTML = '';
   document.getElementById('reportReason').value = '';
   document.getElementById('reportMsg').style.display = 'none';
