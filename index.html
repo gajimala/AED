@@ -2571,6 +2571,9 @@ async function deleteSelectedHistoryEntries(){
   // 실제로 서버에서 삭제 성공한 것만 로컬 캐시에서도 제거(실패한 건 그대로 남겨둬야 재시도 가능)
   _reqCache = loadRequests().filter(r => !succeededIds.includes(r.id));
   _selectedHistoryIds.clear();
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 선택을 비웠지만 선택바 자체를 다시 갱신하는
+  // 걸 빼먹어서, "삭제 중… (16/16)" 문구가 삭제 끝난 뒤에도 화면에 그대로 남아있었음.
+  updateHistorySelectionBar();
   renderRequestsList();
   renderHistoryList();
   alert(`삭제 완료: 성공 ${succeededIds.length}건${fail>0 ? `, 실패 ${fail}건(네트워크 상태를 확인하고 다시 시도해주세요)` : ''}`);
@@ -4927,7 +4930,18 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     } else {
       msg.textContent = `${toSave.length}건 중 ${failCount}건 저장 실패로 지도에서 제외했습니다. 나머지 ${toSave.length-failCount}건은 정상 등록되었습니다.`; msg.className='msg err';
     }
+    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 등록이 끝나도 재시작 복구용 스냅샷
+    // (bulkTableStateBeforeCamera)이 안 지워져서, 나중에 아무 이유로 앱을 껐다 켜면
+    // 이미 등록 끝난 옛날 내용이 "복구됐다"며 다시 나타나고 있었음. 등록이 끝나면
+    // (성공·실패 여부와 무관하게, 이 화면 자체를 닫으니까) 지워서 재발하지 않게 함.
+    try{ localStorage.removeItem('bulkTableStateBeforeCamera'); }catch(e){}
     preview.innerHTML='';
+    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 위에서 preview.innerHTML을 비우면 지도가
+    // 들어있던 div도 통째로 사라지는데, _bulkNewMaps[previewElId]는 그 사라진(떨어져나간)
+    // 지도 객체를 계속 붙잡고 있었음. 그래서 다음에 표를 다시 그려도 "이미 지도 있다"고
+    // 착각해서 새 컨테이너에 새로 안 만들고, 보이지 않는 옛날 지도만 재배치하려다 끝남.
+    // 등록이 끝나면 이 참조 자체를 지워서, 다음번엔 반드시 새로 만들게 함.
+    delete _bulkNewMaps[previewElId];
     buildBulkEditTable();
     if(extraOnDone) extraOnDone();
   };
@@ -5577,6 +5591,8 @@ async function saveBulkEdit(){
     }
   });
   await Promise.all(photoUploads); // 모든 사진 업로드가 실제로 끝날 때까지 기다림
+  // ⚠️ 대량입력과 같은 이유로 여기도 재시작 복구용 스냅샷을 지움(아래 참고)
+  try{ localStorage.removeItem('bulkTableStateBeforeCamera'); }catch(e){}
   clusterer.redraw();
   if(updated>0){
     classifyMissingRegions();
