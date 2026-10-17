@@ -11,6 +11,7 @@
   등록해야 정상 동작합니다.
 -->
 <script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=d02572eca2dd38bbbbb6692254d51bb7&autoload=false&libraries=services,clusterer"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
@@ -2804,8 +2805,8 @@ function onReportPhotoSelected(evt){
 
   // 2) 원본 바이트에서 EXIF GPS 파싱
   const reader = new FileReader();
-  reader.onload = (e)=>{
-    const gps = parseExifGPS(e.target.result);
+  reader.onload = async (e)=>{
+    const gps = await parseExifGPS(e.target.result);
     reportState.photoGPS = gps;
     const badge = document.createElement('div');
     if(gps){
@@ -3359,7 +3360,7 @@ function handleAdminPhotoCapture(file, latId, lngId, previewId){
 
     const reader = new FileReader();
     reader.onload = async (e)=>{
-      const jsGps = parseExifGPS(e.target.result);
+      const jsGps = await parseExifGPS(e.target.result);
       const nativeGps = await nativeGpsPromise; // 네이티브 결과 기다림(또는 1.5초 타임아웃)
       _pendingNativeGpsResolve = null;
       const gps = jsGps || nativeGps; // 자바스크립트가 못 찾았으면 네이티브 결과로 대체
@@ -3414,81 +3415,20 @@ async function uploadAdminPhotoIfAny(id, latId){
   _adminPhotoDataUrl[latId] = null;
 }
 
-function parseExifGPS(arrayBuffer){
+// ⚠️ 2026-10-14 — 직접 짠 EXIF 파서(JPEG 전용 수작업 바이트 파싱)를 걷어내고,
+// 검증된 오픈소스 라이브러리 exifr(7.1.3, 주간 다운로드 77만+, 알려진 보안 문제 없음)로
+// 교체함. 삼성 갤럭시 등 일부 기종 사진에서 직접 짠 파서가 GPS를 제대로 못 읽던 문제가
+// 있었는데(분모 0 처리 버그 + HEIC 미지원), exifr은 JPEG·HEIC·PNG·TIFF를 전부 지원하고
+// 훨씬 더 많은 실제 사진으로 검증되어 있어 이런 기종별 예외 처리에 더 안정적임.
+async function parseExifGPS(fileOrArrayBuffer){
   try{
-    const view = new DataView(arrayBuffer);
-    if(view.getUint16(0) !== 0xFFD8) return null; // JPEG 시그니처 아님
-    let offset = 2;
-    while(offset < view.byteLength){
-      const marker = view.getUint16(offset);
-      if(marker === 0xFFE1){ // APP1 (EXIF)
-        const segLen = view.getUint16(offset+2);
-        const tiffStart = offset + 4 + 6; // 'Exif\0\0' 6바이트 다음이 TIFF 헤더
-        if(view.getUint32(offset+4) !== 0x45786966) return null; // "Exif"
-        const little = view.getUint16(tiffStart) === 0x4949;
-        const ifd0Offset = tiffStart + view.getUint32(tiffStart+4, little);
-        const gpsIfdPtr = findTag(view, tiffStart, ifd0Offset, 0x8825, little);
-        if(gpsIfdPtr == null) return null;
-        const gpsIfd = tiffStart + gpsIfdPtr;
-
-        const latRef = readAscii(view, tiffStart, gpsIfd, 0x0001, little);
-        const lat = readRational3(view, tiffStart, gpsIfd, 0x0002, little);
-        const lngRef = readAscii(view, tiffStart, gpsIfd, 0x0003, little);
-        const lng = readRational3(view, tiffStart, gpsIfd, 0x0004, little);
-        if(lat==null || lng==null) return null;
-
-        let latDeg = lat[0] + lat[1]/60 + lat[2]/3600;
-        let lngDeg = lng[0] + lng[1]/60 + lng[2]/3600;
-        if(latRef === 'S') latDeg = -latDeg;
-        if(lngRef === 'W') lngDeg = -lngDeg;
-        return { lat: latDeg, lng: lngDeg };
-      } else if((marker & 0xFF00) !== 0xFF00){
-        break; // 마커가 아닌 구간 도달 — 중단
-      } else {
-        offset += 2 + view.getUint16(offset+2);
-      }
-    }
-    return null;
+    const result = await exifr.gps(fileOrArrayBuffer);
+    if(!result || result.latitude == null || result.longitude == null) return null;
+    return { lat: result.latitude, lng: result.longitude };
   }catch(e){
-    console.error('EXIF GPS 파싱 실패', e);
+    console.error('EXIF GPS 파싱 실패(exifr)', e);
     return null;
   }
-}
-function findIFDEntry(view, tiffStart, ifdOffset, tag, little){
-  const count = view.getUint16(ifdOffset, little);
-  for(let i=0;i<count;i++){
-    const entryOffset = ifdOffset + 2 + i*12;
-    if(view.getUint16(entryOffset, little) === tag) return entryOffset;
-  }
-  return null;
-}
-function findTag(view, tiffStart, ifdOffset, tag, little){
-  const e = findIFDEntry(view, tiffStart, ifdOffset, tag, little);
-  if(e==null) return null;
-  return view.getUint32(e+8, little);
-}
-function readAscii(view, tiffStart, ifdOffset, tag, little){
-  const e = findIFDEntry(view, tiffStart, ifdOffset, tag, little);
-  if(e==null) return null;
-  return String.fromCharCode(view.getUint8(e+8));
-}
-function readRational3(view, tiffStart, ifdOffset, tag, little){
-  const e = findIFDEntry(view, tiffStart, ifdOffset, tag, little);
-  if(e==null) return null;
-  const valueOffset = tiffStart + view.getUint32(e+8, little);
-  const out = [];
-  for(let i=0;i<3;i++){
-    const num = view.getUint32(valueOffset + i*8, little);
-    const den = view.getUint32(valueOffset + i*8 + 4, little);
-    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 분모가 0이면(값을 제대로 못 읽은 경우)
-    // 그냥 조용히 0으로 처리하고 있었음. 그래서 "못 읽음"이 "진짜 위도/경도 0"으로
-    // 둔갑해서, 전혀 엉뚱한 (0,0) 좌표가 마치 정상 GPS인 것처럼 통과되고 있었음.
-    // 분모가 0이면 이 값 자체를 못 읽은 것으로 보고 null을 돌려줌(잘못된 값 대신
-    // "위치 직접 입력 필요"로 처리되게).
-    if(!den) return null;
-    out.push(num/den);
-  }
-  return out;
 }
 
 /* =========================================================
@@ -4740,7 +4680,7 @@ async function handleMultiPhotoBulkAdd(inputEl){
     const gps = await new Promise((resolve)=>{
       const reader = new FileReader();
       reader.onload = async (e)=>{
-        const jsGps = parseExifGPS(e.target.result);
+        const jsGps = await parseExifGPS(e.target.result);
         if(jsGps){ resolve(jsGps); return; }
         _pendingNativeGpsResolve = null;
         const nativeGpsPromise = new Promise((res)=>{
@@ -5426,7 +5366,7 @@ function handleBulkRowPhotoCapture(inputEl, rowEl, previewElId){
 
   const reader = new FileReader();
   reader.onload = async (e)=>{
-    const jsGps = parseExifGPS(e.target.result);
+    const jsGps = await parseExifGPS(e.target.result);
     // ⚠️ 같은 이유로(갤러리 사진은 GPS가 지워짐) 네이티브 결과도 같이 기다림
     _pendingNativeGpsResolve = null;
     const nativeGpsPromise = new Promise((res)=>{
