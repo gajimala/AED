@@ -5404,7 +5404,9 @@ function handleBulkRowPhotoCapture(inputEl, rowEl, previewElId){
       if(previewElId) refreshBulkNewMapPreview(previewElId);
       else refreshBulkEditMapPreview();
     } else if(!gps){
-      alert('사진에서 위치정보(GPS)를 찾지 못했습니다.');
+      alert(_exifrLoadFailed
+        ? '위치 추출 라이브러리가 로딩되지 않았습니다 — 인터넷 연결을 확인하고 새로고침 후 다시 시도해주세요.'
+        : '사진에서 위치정보(GPS)를 찾지 못했습니다.');
     }
   };
   reader.readAsArrayBuffer(file);
