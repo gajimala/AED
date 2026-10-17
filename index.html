@@ -3124,7 +3124,9 @@ let _pendingNativeLocationResolve = null;
 // 절대 호출되지 않으므로(안전) 아무 영향 없음.
 window.onNativeCurrentLocation = function(lat, lng){
   if(_pendingNativeLocationResolve){
-    _pendingNativeLocationResolve((lat != null && lng != null) ? { lat, lng } : null);
+    // ⚠️ 같은 이유(사용자가 발견한 NaN 버그)로 NaN도 같이 걸러냄
+    const valid = lat != null && lng != null && !isNaN(lat) && !isNaN(lng);
+    _pendingNativeLocationResolve(valid ? { lat, lng } : null);
   }
 };
 
@@ -3275,7 +3277,9 @@ let _pendingNativeGpsResolve = null; // handleAdminPhotoCapture가 네이티브 
 // 이 함수 자체가 절대 호출되지 않으므로(안전) 아무 영향 없음.
 window.onNativeGpsExtracted = function(lat, lng){
   if(_pendingNativeGpsResolve){
-    _pendingNativeGpsResolve((lat != null && lng != null) ? { lat, lng } : null);
+    // ⚠️ 같은 이유(사용자가 발견한 NaN 버그)로 NaN도 같이 걸러냄
+    const valid = lat != null && lng != null && !isNaN(lat) && !isNaN(lng);
+    _pendingNativeGpsResolve(valid ? { lat, lng } : null);
   }
 };
 
@@ -3433,7 +3437,10 @@ async function parseExifGPS(fileOrArrayBuffer){
   }
   try{
     const result = await exifr.gps(fileOrArrayBuffer);
-    if(!result || result.latitude == null || result.longitude == null) return null;
+    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — null 체크만 하고 NaN은 안 걸러서, 깨진 GPS
+    // 값이 "NaN"이라는 글자 그대로 좌표 입력칸에 그대로 박히고 있었음.
+    if(!result || result.latitude == null || result.longitude == null
+       || isNaN(result.latitude) || isNaN(result.longitude)) return null;
     return { lat: result.latitude, lng: result.longitude };
   }catch(e){
     console.error('EXIF GPS 파싱 실패(exifr)', e);
