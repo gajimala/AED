@@ -731,6 +731,10 @@
         <div class="msg" id="bulkDirectMsg"></div>
         <div id="bulkDirectPreview"></div>
         <button class="btn btn-ghost" style="margin-top:10px;" onclick="addBulkDirectRow()">➕ 줄 추가</button>
+        <label class="btn btn-orange" style="margin-top:10px;margin-left:6px;cursor:pointer;">
+          📷 사진 여러 장으로 한번에 추가
+          <input type="file" accept="image/*" multiple style="display:none;" onchange="handleMultiPhotoBulkAdd(this)">
+        </label>
       </div>
       <div class="card">
         <div class="hint"><b>엑셀 업로드</b>: 첫 행은 머리글로 취급됩니다. 열 이름은 <b>위도, 경도, 주소, 비고</b> (또는 lat, lng, addr, note) 중 하나로 인식합니다.</div>
@@ -4679,6 +4683,83 @@ async function addSingle(){
 // 등록 전에 직접 검토·수정하거나 사진으로 위치를 채울 수 있게 함.
 // "표에서 바로 입력하기" — 붙여넣기/엑셀 없이, 빈 표에서 줄을 하나씩 추가하며 입력.
 // 이미 표에 입력해둔 내용(있다면)은 그대로 유지한 채, 새 빈 줄만 하나 추가함.
+// 사진 여러 장을 한 번에 골라서, 사진 개수만큼 줄을 자동으로 만들고 각자 GPS·썸네일을 채움.
+// ⚠️ 네이티브 GPS 콜백(_pendingNativeGpsResolve)이 전역 변수 하나라서, 여러 장을 동시에
+// 처리하면 서로 뒤섞일 수 있음 — 반드시 한 장씩 순서대로(await) 처리함.
+async function handleMultiPhotoBulkAdd(inputEl){
+  const files = Array.from(inputEl.files || []);
+  if(!files.length) return;
+
+  const body = document.getElementById('bulkDirectPreview_body');
+  let current = body ? Array.from(body.querySelectorAll('tr')).map(tr => ({
+    id: tr.dataset.id,
+    addr: tr.querySelector('.bn-addr')?.value || '',
+    lat: tr.querySelector('.bn-lat')?.value || '',
+    lng: tr.querySelector('.bn-lng')?.value || '',
+    note: tr.querySelector('.bn-note')?.value || ''
+  })) : [];
+
+  const msg = document.getElementById('bulkDirectMsg');
+  const newRowPhotos = {}; // id -> 썸네일(base64) — 표를 새로 그린 뒤 _bulkRowPhotoStore에 옮겨 담음
+
+  for(let i=0; i<files.length; i++){
+    msg.textContent = `사진 처리 중… (${i+1}/${files.length})`; msg.className='msg ok'; msg.style.display='block';
+    const file = files[i];
+    const id = newId();
+
+    // 1) 축소 썸네일(다른 사진 처리 경로들과 동일한 방식)
+    const thumbDataUrl = await new Promise((resolve)=>{
+      const imgUrl = URL.createObjectURL(file);
+      const imgEl = new Image();
+      imgEl.onload = ()=>{
+        const maxW = 480;
+        const scale = Math.min(1, maxW / imgEl.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = imgEl.width * scale;
+        canvas.height = imgEl.height * scale;
+        canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+        const url = canvas.toDataURL('image/jpeg', 0.6);
+        URL.revokeObjectURL(imgUrl);
+        resolve(url);
+      };
+      imgEl.onerror = ()=>resolve(null);
+      imgEl.src = imgUrl;
+    });
+    if(thumbDataUrl) newRowPhotos[id] = thumbDataUrl;
+
+    // 2) GPS — 자바스크립트 EXIF 파싱 먼저, 실패하면 네이티브(갤러리 GPS 리택션 우회) 결과를 기다림
+    const gps = await new Promise((resolve)=>{
+      const reader = new FileReader();
+      reader.onload = async (e)=>{
+        const jsGps = parseExifGPS(e.target.result);
+        if(jsGps){ resolve(jsGps); return; }
+        _pendingNativeGpsResolve = null;
+        const nativeGpsPromise = new Promise((res)=>{
+          _pendingNativeGpsResolve = res;
+          setTimeout(()=>res(null), 1500);
+        });
+        const nativeGps = await nativeGpsPromise;
+        _pendingNativeGpsResolve = null;
+        resolve(nativeGps);
+      };
+      reader.onerror = ()=>resolve(null);
+      reader.readAsArrayBuffer(file);
+    });
+
+    current.push({ id, lat: gps ? gps.lat.toFixed(6) : '', lng: gps ? gps.lng.toFixed(6) : '', addr:'', note: gps ? '' : '⚠️ 위치 직접 입력 필요' });
+  }
+
+  renderBulkNewPreviewTable(current, 'bulkDirectPreview', 'bulkDirectMsg', '표 직접입력(사진 일괄추가)');
+  // 표가 새로 그려진 뒤, 방금 만든 사진들을 id 기준 저장소로 옮겨 담음(저장 시 업로드됨)
+  Object.keys(newRowPhotos).forEach(id => { _bulkRowPhotoStore[id] = newRowPhotos[id]; });
+  refreshBulkNewMapPreview('bulkDirectPreview');
+
+  const noGpsCount = current.filter(r => newRowPhotos.hasOwnProperty(r.id) ? !r.lat : false).length;
+  msg.textContent = `${files.length}장 처리 완료${noGpsCount>0 ? ` — ${noGpsCount}장은 위치를 못 찾아 직접 입력이 필요합니다` : ''}`;
+  msg.className = noGpsCount>0 ? 'msg err' : 'msg ok'; msg.style.display='block';
+  inputEl.value = ''; // 같은 파일을 다시 골라도 onchange가 또 일어나게 초기화
+}
+
 function addBulkDirectRow(){
   const body = document.getElementById('bulkDirectPreview_body');
   const current = body ? Array.from(body.querySelectorAll('tr')).map(tr => ({
