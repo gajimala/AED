@@ -3480,7 +3480,13 @@ function readRational3(view, tiffStart, ifdOffset, tag, little){
   for(let i=0;i<3;i++){
     const num = view.getUint32(valueOffset + i*8, little);
     const den = view.getUint32(valueOffset + i*8 + 4, little);
-    out.push(den ? num/den : 0);
+    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 분모가 0이면(값을 제대로 못 읽은 경우)
+    // 그냥 조용히 0으로 처리하고 있었음. 그래서 "못 읽음"이 "진짜 위도/경도 0"으로
+    // 둔갑해서, 전혀 엉뚱한 (0,0) 좌표가 마치 정상 GPS인 것처럼 통과되고 있었음.
+    // 분모가 0이면 이 값 자체를 못 읽은 것으로 보고 null을 돌려줌(잘못된 값 대신
+    // "위치 직접 입력 필요"로 처리되게).
+    if(!den) return null;
+    out.push(num/den);
   }
   return out;
 }
