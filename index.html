@@ -4643,7 +4643,15 @@ function initBulkNewMapPreview(previewElId){
 
 // 표에 지금 적혀있는 좌표들을 그대로 다시 읽어서 지도 위 마커를 전부 새로 그림 —
 // 좌표를 타이핑하거나, 사진/GPS로 자동입력되거나, 줄을 지울 때마다 호출됨
+let _bulkNewMapRefreshTimers = {}; // previewElId별 디바운스 타이머
 function refreshBulkNewMapPreview(previewElId){
+  // ⚠️ 요청받은 개선 — 타이핑할 때마다(oninput) 바로 지도를 맞추면, 숫자 한 글자씩 입력되는
+  // 중간 값(예: "3"만 입력된 순간)에도 지도가 요동치며 튐. 입력을 잠깐 멈췄을 때만
+  // (250ms) 실제로 다시 그리도록 디바운스함 — 타이핑 자체는 안 막고, 반영만 살짝 늦춤.
+  clearTimeout(_bulkNewMapRefreshTimers[previewElId]);
+  _bulkNewMapRefreshTimers[previewElId] = setTimeout(()=>_doRefreshBulkNewMapPreview(previewElId), 250);
+}
+function _doRefreshBulkNewMapPreview(previewElId){
   const entry = _bulkNewMaps[previewElId];
   if(!entry) return;
   entry.clusterer.clear();
@@ -4683,8 +4691,8 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
         ${parsed.map(r=>`
           <tr data-id="${r.id}">
             <td><input type="text" class="bn-addr" value="${(r.addr||'').replace(/"/g,'&quot;')}"></td>
-            <td><input type="text" class="bn-lat" value="${r.lat}" style="width:100px;" onchange="refreshBulkNewMapPreview('${previewElId}')"></td>
-            <td><input type="text" class="bn-lng" value="${r.lng}" style="width:100px;" onchange="refreshBulkNewMapPreview('${previewElId}')"></td>
+            <td><input type="text" class="bn-lat" value="${r.lat}" style="width:100px;" oninput="refreshBulkNewMapPreview('${previewElId}')"></td>
+            <td><input type="text" class="bn-lng" value="${r.lng}" style="width:100px;" oninput="refreshBulkNewMapPreview('${previewElId}')"></td>
             <td><input type="text" class="bn-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
             <td style="text-align:center;white-space:nowrap;">
               <label style="cursor:pointer;font-size:16px;" title="바로 촬영(재시작 없음)" onclick="event.preventDefault(); openInAppCameraForRow(this.closest('tr'), '${previewElId}');">
@@ -5041,12 +5049,16 @@ function initBulkEditMap(){
   const container = document.getElementById('bulkEditMap');
   if(!container || typeof kakao === 'undefined') return;
   if(!_bulkEditMap){
-    _bulkEditMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(36.5, 127.8), level: 12 });
+    // ⚠️ 요청받은 개선 — 예전엔 레벨12(전국 단위)로 시작했다가 마커 전체에 맞춰 더 축소돼서
+    // 너무 넓게 보였음. 신규입력 미니맵과 똑같이, 메인 지도가 보던 위치를 기준으로
+    // 레벨6(가까운 거리)로 시작하게 바꿈.
+    const center = (map ? map.getCenter() : new kakao.maps.LatLng(37.78, 128.95));
+    _bulkEditMap = new kakao.maps.Map(container, { center, level: 6 });
     _bulkEditMapClusterer = new kakao.maps.MarkerClusterer({ map: _bulkEditMap, averageCenter: true, minLevel: 8, gridSize: 80 });
   } else {
     setTimeout(()=>_bulkEditMap.relayout(), 0);
   }
-  refreshBulkEditMapPreview();
+  redrawBulkEditMapMarkers(); // 마커만 다시 그림(시점은 안 건드림)
 }
 
 const BULK_MAP_ICON_NORMAL = () => new kakao.maps.MarkerImage(
@@ -5058,26 +5070,23 @@ const BULK_MAP_ICON_SELECTED = () => new kakao.maps.MarkerImage(
   new kakao.maps.Size(28,28)
 );
 
-function refreshBulkEditMapPreview(){
+// ⚠️ 요청받은 개선 — 예전엔 마커를 다시 그릴 때마다 전체 범위에 맞춰 지도 시점을
+// 강제로 옮겼음(selectBounds). 그래서 지도 위 마커를 하나 선택할 때마다 보던 위치가
+// 리셋돼버렸음. 이제 마커만 다시 그리고, 지도의 중심·확대수준은 절대 안 건드림
+// (사용자가 직접 옮긴 시점을 그대로 유지).
+function redrawBulkEditMapMarkers(){
   if(!_bulkEditMapClusterer) return;
   _bulkEditMapClusterer.clear();
-  const positions = [];
   const markers = bulkFilteredList.map(rec=>{
     const pos = new kakao.maps.LatLng(rec.lat, rec.lng);
-    positions.push(pos);
     const selected = _bulkMapSelectedIds.has(rec.id);
     const m = new kakao.maps.Marker({ position: pos, image: selected ? BULK_MAP_ICON_SELECTED() : BULK_MAP_ICON_NORMAL() });
     kakao.maps.event.addListener(m, 'click', ()=> toggleBulkMapSelection(rec.id));
     return m;
   });
   _bulkEditMapClusterer.addMarkers(markers);
-  if(positions.length === 1){ _bulkEditMap.setCenter(positions[0]); _bulkEditMap.setLevel(6); }
-  else if(positions.length > 1){
-    const bounds = new kakao.maps.LatLngBounds();
-    positions.forEach(p=>bounds.extend(p));
-    _bulkEditMap.setBounds(bounds);
-  }
 }
+function refreshBulkEditMapPreview(){ redrawBulkEditMapMarkers(); } // 기존 호출부 호환용 별칭
 
 function toggleBulkMapSelection(id){
   if(_bulkMapSelectedIds.has(id)) _bulkMapSelectedIds.delete(id);
