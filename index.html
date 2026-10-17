@@ -774,6 +774,12 @@
             <option value="all">시/군/구: 전체</option>
           </select>
         </div>
+        <div id="bulkEditMap" style="width:100%;height:260px;border-radius:12px;border:1px solid var(--line);margin:10px 0;"></div>
+        <div class="hint" style="margin-top:-4px;">지도 위 마커를 눌러 여러 개를 선택할 수 있습니다(선택된 건 파란색). 선택하면 아래 표에서도 그 줄만 표시됩니다.</div>
+        <div class="row" id="bulkMapSelectionBar" style="margin-top:6px;gap:8px;display:none;">
+          <span class="count-pill" id="bulkMapSelectedCount">0개 선택됨</span>
+          <button class="btn btn-ghost btn-sm" onclick="clearBulkMapSelection()">선택 해제</button>
+        </div>
         <div style="overflow-x:auto;margin-top:10px;">
           <table class="bulk" id="bulkEditTable">
             <thead><tr><th>주소</th><th>위도</th><th>경도</th><th>비고</th><th></th><th></th></tr></thead>
@@ -3025,8 +3031,8 @@ async function openInAppCameraForReport(){
   }
 }
 
-async function openInAppCameraForRow(rowEl){
-  _inAppCameraTarget = { rowEl };
+async function openInAppCameraForRow(rowEl, previewElId){
+  _inAppCameraTarget = { rowEl, previewElId };
   const msg = document.getElementById('inAppCameraMsg');
   msg.style.display = 'none';
 
@@ -3145,6 +3151,9 @@ async function captureInAppPhoto(){
       lngInput.value = gps.lng.toFixed(6);
       rowEl.style.background = '#EAF7EE';
       setTimeout(()=>{ rowEl.style.background = ''; }, 1200);
+      // ⚠️ .value를 코드로 바꾸면 onchange가 자동으로 안 일어나므로, 지도 미리보기를 직접 갱신해줌
+      if(_inAppCameraTarget.previewElId) refreshBulkNewMapPreview(_inAppCameraTarget.previewElId);
+      else refreshBulkEditMapPreview();
     } else if(!gps){
       alert('위치를 가져오지 못했습니다. 좌표를 직접 입력해주세요.');
     }
@@ -4252,8 +4261,11 @@ function initNewMapPicker(){
 function refreshNewMapPickerMarkers(){
   if(!newMapClusterer) return;
   newMapClusterer.clear();
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — LIFESAVER_ICON 하나로 고정해서 그려서,
+  // 민간제보(빨강)/관리자(주황) 색상 구분이 이 미니맵에서는 전혀 안 보이고 있었음.
+  // 메인 지도와 똑같이 pickLifesaverIcon(rec)을 써서 lastEditSource에 따라 색이 구분되게 함.
   const markers = loadRecords().map(rec=>{
-    const m = new kakao.maps.Marker({ position: new kakao.maps.LatLng(rec.lat, rec.lng), image: LIFESAVER_ICON });
+    const m = new kakao.maps.Marker({ position: new kakao.maps.LatLng(rec.lat, rec.lng), image: pickLifesaverIcon(rec) });
     kakao.maps.event.addListener(m, 'click', ()=> openMarkerSheet(rec.id));
     return m;
   });
@@ -4613,6 +4625,50 @@ function addBulkDirectRow(){
   renderBulkNewPreviewTable(current, 'bulkDirectPreview', 'bulkDirectMsg', '표 직접입력');
 }
 
+// 대량입력 미리보기 표 하나당 지도 하나씩 관리(붙여넣기/엑셀/표직접입력 3곳이 각자 독립적으로 가질 수 있음)
+let _bulkNewMaps = {}; // { previewElId: { map, clusterer } }
+
+function initBulkNewMapPreview(previewElId){
+  const container = document.getElementById(previewElId+'_map');
+  if(!container || typeof kakao === 'undefined') return;
+  if(!_bulkNewMaps[previewElId]){
+    const map = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(36.5, 127.8), level: 12 });
+    const clusterer = new kakao.maps.MarkerClusterer({ map, averageCenter: true, minLevel: 8, gridSize: 80 });
+    _bulkNewMaps[previewElId] = { map, clusterer };
+  } else {
+    setTimeout(()=>_bulkNewMaps[previewElId].map.relayout(), 0); // 숨겨져 있다가 다시 보일 때 크기 재계산
+  }
+  refreshBulkNewMapPreview(previewElId);
+}
+
+// 표에 지금 적혀있는 좌표들을 그대로 다시 읽어서 지도 위 마커를 전부 새로 그림 —
+// 좌표를 타이핑하거나, 사진/GPS로 자동입력되거나, 줄을 지울 때마다 호출됨
+function refreshBulkNewMapPreview(previewElId){
+  const entry = _bulkNewMaps[previewElId];
+  if(!entry) return;
+  entry.clusterer.clear();
+  const rows = document.querySelectorAll(`#${previewElId}_body tr`);
+  const positions = [];
+  const markers = [];
+  rows.forEach(tr=>{
+    const lat = parseFloat(tr.querySelector('.bn-lat')?.value);
+    const lng = parseFloat(tr.querySelector('.bn-lng')?.value);
+    if(isNaN(lat) || isNaN(lng)) return;
+    const pos = new kakao.maps.LatLng(lat, lng);
+    positions.push(pos);
+    markers.push(new kakao.maps.Marker({ position: pos, image: NEW_PICK_ICON() }));
+  });
+  entry.clusterer.addMarkers(markers);
+  if(positions.length === 1){
+    entry.map.setCenter(positions[0]);
+    entry.map.setLevel(6);
+  } else if(positions.length > 1){
+    const bounds = new kakao.maps.LatLngBounds();
+    positions.forEach(p=>bounds.extend(p));
+    entry.map.setBounds(bounds);
+  }
+}
+
 function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extraOnDone){
   const preview = document.getElementById(previewElId);
   const msg = document.getElementById(msgElId);
@@ -4620,30 +4676,32 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
 
   preview.innerHTML = `
     <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">${parsed.length}건 — 아래에서 확인·수정 후 등록하세요</div>
+    <div id="${previewElId}_map" style="width:100%;height:220px;border-radius:12px;border:1px solid var(--line);margin:8px 0;"></div>
     <table class="bulk" style="margin-top:8px;">
       <thead><tr><th>주소</th><th>위도</th><th>경도</th><th>비고</th><th></th><th></th></tr></thead>
       <tbody id="${previewElId}_body">
         ${parsed.map(r=>`
           <tr data-id="${r.id}">
             <td><input type="text" class="bn-addr" value="${(r.addr||'').replace(/"/g,'&quot;')}"></td>
-            <td><input type="text" class="bn-lat" value="${r.lat}" style="width:100px;"></td>
-            <td><input type="text" class="bn-lng" value="${r.lng}" style="width:100px;"></td>
+            <td><input type="text" class="bn-lat" value="${r.lat}" style="width:100px;" onchange="refreshBulkNewMapPreview('${previewElId}')"></td>
+            <td><input type="text" class="bn-lng" value="${r.lng}" style="width:100px;" onchange="refreshBulkNewMapPreview('${previewElId}')"></td>
             <td><input type="text" class="bn-note" value="${(r.note||'').replace(/"/g,'&quot;')}" style="width:90px;"></td>
             <td style="text-align:center;white-space:nowrap;">
-              <label style="cursor:pointer;font-size:16px;" title="바로 촬영(재시작 없음)" onclick="event.preventDefault(); openInAppCameraForRow(this.closest('tr'));">
+              <label style="cursor:pointer;font-size:16px;" title="바로 촬영(재시작 없음)" onclick="event.preventDefault(); openInAppCameraForRow(this.closest('tr'), '${previewElId}');">
                 📸
               </label>
               <label style="cursor:pointer;font-size:16px;margin-left:4px;" title="사진 선택(카메라/앨범)">
-                📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'))">
+                📷<input type="file" accept="image/*" style="display:none;" onchange="handleBulkRowPhotoCapture(this, this.closest('tr'), '${previewElId}')">
               </label>
             </td>
-            <td class="del" onclick="this.closest('tr').remove()">🗑</td>
+            <td class="del" onclick="this.closest('tr').remove(); refreshBulkNewMapPreview('${previewElId}')">🗑</td>
           </tr>
         `).join('')}
       </tbody>
     </table>
     <button class="btn btn-orange" style="margin-top:10px;" id="${previewElId}_confirmBtn">전체 등록하기</button>
   `;
+  initBulkNewMapPreview(previewElId);
 
   document.getElementById(previewElId+'_confirmBtn').onclick = async ()=>{
     // 등록 직전에 표에 지금 보이는(수정됐을 수도, 지워졌을 수도 있는) 값을 그대로 다시 읽음
@@ -4951,6 +5009,9 @@ function splitRegion(regionStr){
   return { sido: parts[0]||'', sigungu: parts.slice(1).join(' ')||'' };
 }
 
+let _bulkEditMap = null, _bulkEditMapClusterer = null;
+let _bulkMapSelectedIds = new Set(); // 지도에서 선택한 항목의 id들 — 비어있으면 "선택 없음"(필터 결과 전체를 표에 보여줌)
+
 function buildBulkEditTable(){
   const all = loadRecords();
   document.getElementById('totalCount').textContent = all.length;
@@ -4966,9 +5027,87 @@ function buildBulkEditTable(){
     const matchSigungu = sigungu==='all' || parts.sigungu===sigungu;
     return matchAddr && matchSido && matchSigungu;
   });
+  _bulkMapSelectedIds.clear(); // 필터가 바뀌면 이전 선택은 더 이상 안 맞을 수 있으므로 초기화
+  updateBulkMapSelectionBar();
   bulkRenderedCount = 0;
   document.getElementById('bulkEditBody').innerHTML = '';
   renderMoreBulkRows();
+  initBulkEditMap();
+}
+
+// 대량수정 화면의 지도 — 지금 필터링된 전체(bulkFilteredList)를 마커로 보여주고,
+// 클릭하면 선택/해제 토글됨(선택된 건 파란색 마커). 선택이 1개 이상이면 표도 그 항목들만 보여줌.
+function initBulkEditMap(){
+  const container = document.getElementById('bulkEditMap');
+  if(!container || typeof kakao === 'undefined') return;
+  if(!_bulkEditMap){
+    _bulkEditMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(36.5, 127.8), level: 12 });
+    _bulkEditMapClusterer = new kakao.maps.MarkerClusterer({ map: _bulkEditMap, averageCenter: true, minLevel: 8, gridSize: 80 });
+  } else {
+    setTimeout(()=>_bulkEditMap.relayout(), 0);
+  }
+  refreshBulkEditMapPreview();
+}
+
+const BULK_MAP_ICON_NORMAL = () => new kakao.maps.MarkerImage(
+  'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="9" fill="#E03131" stroke="#fff" stroke-width="2"/></svg>'),
+  new kakao.maps.Size(24,24)
+);
+const BULK_MAP_ICON_SELECTED = () => new kakao.maps.MarkerImage(
+  'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="11" fill="#1971C2" stroke="#fff" stroke-width="3"/></svg>'),
+  new kakao.maps.Size(28,28)
+);
+
+function refreshBulkEditMapPreview(){
+  if(!_bulkEditMapClusterer) return;
+  _bulkEditMapClusterer.clear();
+  const positions = [];
+  const markers = bulkFilteredList.map(rec=>{
+    const pos = new kakao.maps.LatLng(rec.lat, rec.lng);
+    positions.push(pos);
+    const selected = _bulkMapSelectedIds.has(rec.id);
+    const m = new kakao.maps.Marker({ position: pos, image: selected ? BULK_MAP_ICON_SELECTED() : BULK_MAP_ICON_NORMAL() });
+    kakao.maps.event.addListener(m, 'click', ()=> toggleBulkMapSelection(rec.id));
+    return m;
+  });
+  _bulkEditMapClusterer.addMarkers(markers);
+  if(positions.length === 1){ _bulkEditMap.setCenter(positions[0]); _bulkEditMap.setLevel(6); }
+  else if(positions.length > 1){
+    const bounds = new kakao.maps.LatLngBounds();
+    positions.forEach(p=>bounds.extend(p));
+    _bulkEditMap.setBounds(bounds);
+  }
+}
+
+function toggleBulkMapSelection(id){
+  if(_bulkMapSelectedIds.has(id)) _bulkMapSelectedIds.delete(id);
+  else _bulkMapSelectedIds.add(id);
+  updateBulkMapSelectionBar();
+  refreshBulkEditMapPreview();
+  // 선택 상태가 바뀌면 표도 그에 맞게 다시 그림(선택 있으면 선택된 것만, 없으면 전체)
+  bulkRenderedCount = 0;
+  document.getElementById('bulkEditBody').innerHTML = '';
+  renderMoreBulkRows();
+}
+
+function clearBulkMapSelection(){
+  _bulkMapSelectedIds.clear();
+  updateBulkMapSelectionBar();
+  refreshBulkEditMapPreview();
+  bulkRenderedCount = 0;
+  document.getElementById('bulkEditBody').innerHTML = '';
+  renderMoreBulkRows();
+}
+
+function updateBulkMapSelectionBar(){
+  const bar = document.getElementById('bulkMapSelectionBar');
+  const countEl = document.getElementById('bulkMapSelectedCount');
+  if(_bulkMapSelectedIds.size > 0){
+    bar.style.display = 'flex';
+    countEl.textContent = `${_bulkMapSelectedIds.size}개 선택됨`;
+  } else {
+    bar.style.display = 'none';
+  }
 }
 
 // 공용: 도/광역시 드롭다운 채우기
@@ -5042,7 +5181,11 @@ function onBulkSearch(){ buildBulkEditTable(); }
 
 function renderMoreBulkRows(){
   const body = document.getElementById('bulkEditBody');
-  const slice = bulkFilteredList.slice(bulkRenderedCount, bulkRenderedCount + BULK_PAGE_SIZE);
+  // ⚠️ 지도에서 선택한 게 있으면(1개 이상) 그것들만 표에 보여줌 — 없으면 기존처럼 필터 결과 전체
+  const effectiveList = _bulkMapSelectedIds.size > 0
+    ? bulkFilteredList.filter(r => _bulkMapSelectedIds.has(r.id))
+    : bulkFilteredList;
+  const slice = effectiveList.slice(bulkRenderedCount, bulkRenderedCount + BULK_PAGE_SIZE);
   body.insertAdjacentHTML('beforeend', slice.map(r=>`
     <tr data-id="${r.id}">
       <td><input type="text" class="be-addr" value="${(r.addr||'').replace(/"/g,'&quot;')}"></td>
@@ -5064,10 +5207,10 @@ function renderMoreBulkRows(){
   document.getElementById('visibleCount').textContent = bulkRenderedCount;
 
   const moreBox = document.getElementById('bulkEditMore');
-  const remain = bulkFilteredList.length - bulkRenderedCount;
+  const remain = effectiveList.length - bulkRenderedCount;
   moreBox.innerHTML = remain > 0
     ? `<button class="btn btn-ghost btn-sm" onclick="renderMoreBulkRows()">${remain}건 더 보기</button>`
-    : (bulkFilteredList.length===0 ? `<span style="font-size:12.5px;color:var(--ink-soft);">검색 결과 없음</span>` : '');
+    : (effectiveList.length===0 ? `<span style="font-size:12.5px;color:var(--ink-soft);">검색 결과 없음</span>` : '');
 }
 
 // 대량수정 표에서, 한 줄(행)의 카메라 아이콘을 눌러 사진을 찍으면 그 줄의 위도/경도만
@@ -5076,7 +5219,7 @@ function renderMoreBulkRows(){
 // ⚠️ 진짜 버그였던 부분(재검증 중 발견) — 원래 .be-lat/.be-lng만 찾도록 짜여있어서,
 // 대량입력 미리보기 표(.bn-lat/.bn-lng를 씀)에서는 카메라 버튼을 눌러도 아무 반응이 없었음.
 // 이제 두 표 어느 쪽이든 실제로 있는 입력칸을 찾아서 채우도록 고침.
-function handleBulkRowPhotoCapture(inputEl, rowEl){
+function handleBulkRowPhotoCapture(inputEl, rowEl, previewElId){
   const file = inputEl.files[0];
   if(!file || !rowEl) return;
   // ⚠️ 카메라 앱이 열리는 동안 앱이 재시작될 수 있어서(운영체제 메모리 관리), 지금 이 표에
@@ -5108,6 +5251,8 @@ function handleBulkRowPhotoCapture(inputEl, rowEl){
     if(gps && latInput && lngInput){
       latInput.value = gps.lat.toFixed(6);
       lngInput.value = gps.lng.toFixed(6);
+      if(previewElId) refreshBulkNewMapPreview(previewElId);
+      else refreshBulkEditMapPreview();
     } else if(!gps){
       alert('사진에서 위치정보(GPS)를 찾지 못했습니다.');
     }
