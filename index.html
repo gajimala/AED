@@ -842,6 +842,11 @@
           <option value="all">소속 해양경찰서: 전체</option>
         </select>
         <div style="font-size:12px;color:var(--ink-soft);margin:8px 0;">전체 <b id="historyCount">0</b>건</div>
+        <div class="row" id="historySelectionBar" style="gap:8px;margin-bottom:8px;display:none;">
+          <span class="count-pill" id="historySelectedCount">0개 선택됨</span>
+          <button class="btn btn-danger btn-sm" onclick="deleteSelectedHistoryEntries()">선택 삭제</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearHistorySelection()">선택 해제</button>
+        </div>
         <div id="historyList"></div>
       </div>
     </div>
@@ -2511,6 +2516,63 @@ async function resolveRequestEntry(id, status, newTargetId){
   }
 }
 // 이력/제보 항목 자체를 삭제 — 관리자 코드 확인 후에만 진행(데이터 반영과는 무관, 기록만 지움)
+let _selectedHistoryIds = new Set(); // 변경이력 탭에서 체크박스로 선택한 항목들
+
+function toggleHistorySelection(id, checked){
+  if(checked) _selectedHistoryIds.add(id);
+  else _selectedHistoryIds.delete(id);
+  updateHistorySelectionBar();
+}
+
+function clearHistorySelection(){
+  _selectedHistoryIds.clear();
+  document.querySelectorAll('.hist-select-cb').forEach(cb=>cb.checked=false);
+  updateHistorySelectionBar();
+}
+
+function updateHistorySelectionBar(){
+  const bar = document.getElementById('historySelectionBar');
+  const countEl = document.getElementById('historySelectedCount');
+  if(_selectedHistoryIds.size > 0){
+    bar.style.display = 'flex';
+    countEl.textContent = `${_selectedHistoryIds.size}개 선택됨`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+// 체크된 이력들을 한 번에 삭제 — 관리자 코드는 한 번만 묻고, 하나씩 순서대로 삭제함
+// (lifesavers.json 동시수정 충돌 때와 같은 이유로, 여러 건을 한꺼번에 병렬로 보내지 않음)
+async function deleteSelectedHistoryEntries(){
+  const ids = [...selectedHistoryIdsSnapshot()];
+  if(!ids.length) return;
+  const code = prompt(`선택한 ${ids.length}건을 삭제하려면 관리자 코드를 입력하세요`);
+  if(code === null) return;
+  if(code !== MASTER_CODE && code !== STATION_CODE){ alert('코드가 올바르지 않습니다.'); return; }
+  if(!confirm(`선택한 ${ids.length}건을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+
+  const succeededIds = [];
+  let fail = 0;
+  for(let i=0; i<ids.length; i++){
+    document.getElementById('historySelectedCount').textContent = `삭제 중… (${i+1}/${ids.length})`;
+    try{
+      const res = await fetch(`${WORKER_URL}/reports/${ids[i]}`, { method:'DELETE', headers:{ 'X-Admin-Code': ADMIN_CODE } });
+      if(!res.ok) throw new Error(await res.text());
+      succeededIds.push(ids[i]);
+    }catch(e){
+      console.error('이력 삭제 실패:', ids[i], e);
+      fail++;
+    }
+  }
+  // 실제로 서버에서 삭제 성공한 것만 로컬 캐시에서도 제거(실패한 건 그대로 남겨둬야 재시도 가능)
+  _reqCache = loadRequests().filter(r => !succeededIds.includes(r.id));
+  _selectedHistoryIds.clear();
+  renderRequestsList();
+  renderHistoryList();
+  alert(`삭제 완료: 성공 ${succeededIds.length}건${fail>0 ? `, 실패 ${fail}건(네트워크 상태를 확인하고 다시 시도해주세요)` : ''}`);
+}
+function selectedHistoryIdsSnapshot(){ return _selectedHistoryIds; }
+
 function deleteRequestEntry(id){
   const code = prompt('삭제하려면 관리자 코드를 입력하세요');
   if(code === null) return; // 취소 누름
@@ -4316,8 +4378,13 @@ function renderReqCard(r, actionable){
   const sourceBadge = r.source==='admin'
     ? `<span style="color:var(--navy);font-weight:700;">🛡 관리자 직접</span> <span style="color:var(--ink-soft);font-weight:400;">${r.org ? `(${r.org.station}·${r.org.dept})` : '(🔑 마스터)'}</span>`
     : `<span style="color:var(--orange);font-weight:700;">👤 민간인 제보</span>`;
+  const checkbox = (!actionable) ? `<label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:pointer;">
+      <input type="checkbox" class="hist-select-cb" data-id="${r.id}" onchange="toggleHistorySelection('${r.id}', this.checked)" ${_selectedHistoryIds.has(r.id)?'checked':''}>
+      <span style="font-size:12px;color:var(--ink-soft);">선택</span>
+    </label>` : '';
   return `
     <div class="req-card">
+      ${checkbox}
       ${r.photoDataUrl ? `<img src="${r.photoDataUrl}">` : ''}
       <div class="req-meta">
         <b>${TYPE_LABEL[r.type]||r.type}</b> · ${sourceBadge} · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
@@ -4655,9 +4722,19 @@ function _doRefreshBulkNewMapPreview(previewElId){
   const entry = _bulkNewMaps[previewElId];
   if(!entry) return;
   entry.clusterer.clear();
+  // ⚠️ 요청받은 개선 — 신규입력 미니맵처럼, 기존에 이미 등록된 구조함도 참고용으로
+  // 같이 보여줌(민간/관리자 색상 구분 그대로 적용) — 새로 입력 중인 것들과 겹치는지,
+  // 주변에 뭐가 있는지 한눈에 볼 수 있게 함. 새로 입력 중인 건 별도 아이콘(NEW_PICK_ICON)
+  // 으로 구분되게 둠.
+  const existingMarkers = loadRecords().map(rec=>{
+    const m = new kakao.maps.Marker({ position: new kakao.maps.LatLng(rec.lat, rec.lng), image: pickLifesaverIcon(rec) });
+    kakao.maps.event.addListener(m, 'click', ()=> openMarkerSheet(rec.id));
+    return m;
+  });
+
   const rows = document.querySelectorAll(`#${previewElId}_body tr`);
   const positions = [];
-  const markers = [];
+  const markers = [...existingMarkers];
   rows.forEach(tr=>{
     const lat = parseFloat(tr.querySelector('.bn-lat')?.value);
     const lng = parseFloat(tr.querySelector('.bn-lng')?.value);
@@ -5061,13 +5138,12 @@ function initBulkEditMap(){
   redrawBulkEditMapMarkers(); // 마커만 다시 그림(시점은 안 건드림)
 }
 
-const BULK_MAP_ICON_NORMAL = () => new kakao.maps.MarkerImage(
-  'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="9" fill="#E03131" stroke="#fff" stroke-width="2"/></svg>'),
-  new kakao.maps.Size(24,24)
-);
-const BULK_MAP_ICON_SELECTED = () => new kakao.maps.MarkerImage(
-  'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="11" fill="#1971C2" stroke="#fff" stroke-width="3"/></svg>'),
-  new kakao.maps.Size(28,28)
+// ⚠️ 요청받은 개선 — 일반 지도와 똑같은 구조함 아이콘(민간/관리자 색상 구분)을 써야
+// 뭐가 민간제보고 뭐가 관리자 등록인지 구별이 됨. 선택 표시는 아이콘 자체를 바꾸는 대신,
+// 아이콘 뒤에 파란 테두리(선택 링)를 깔아서 원래 아이콘은 그대로 보이게 함.
+const BULK_MAP_SELECTION_RING = () => new kakao.maps.MarkerImage(
+  'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46"><circle cx="23" cy="23" r="20" fill="#1971C2" fill-opacity="0.35" stroke="#1971C2" stroke-width="3"/></svg>'),
+  new kakao.maps.Size(46,46)
 );
 
 // ⚠️ 요청받은 개선 — 예전엔 마커를 다시 그릴 때마다 전체 범위에 맞춰 지도 시점을
@@ -5077,12 +5153,17 @@ const BULK_MAP_ICON_SELECTED = () => new kakao.maps.MarkerImage(
 function redrawBulkEditMapMarkers(){
   if(!_bulkEditMapClusterer) return;
   _bulkEditMapClusterer.clear();
-  const markers = bulkFilteredList.map(rec=>{
+  const markers = [];
+  bulkFilteredList.forEach(rec=>{
     const pos = new kakao.maps.LatLng(rec.lat, rec.lng);
     const selected = _bulkMapSelectedIds.has(rec.id);
-    const m = new kakao.maps.Marker({ position: pos, image: selected ? BULK_MAP_ICON_SELECTED() : BULK_MAP_ICON_NORMAL() });
+    // 선택된 항목은 실제 아이콘 뒤에 파란 선택 링을 먼저 깔아서(zIndex 낮게), 아이콘이 그 위에 보이게 함
+    if(selected){
+      markers.push(new kakao.maps.Marker({ position: pos, image: BULK_MAP_SELECTION_RING(), zIndex: 1 }));
+    }
+    const m = new kakao.maps.Marker({ position: pos, image: pickLifesaverIcon(rec), zIndex: 10 });
     kakao.maps.event.addListener(m, 'click', ()=> toggleBulkMapSelection(rec.id));
-    return m;
+    markers.push(m);
   });
   _bulkEditMapClusterer.addMarkers(markers);
 }
