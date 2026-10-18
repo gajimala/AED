@@ -1035,38 +1035,6 @@ async function batchPatchRecords(patches){
 // 재시작 자체를 막을 순 없지만, 재시작돼도 "제보 종류/대상/입력하던 사유"는 복구되도록
 // 만들어서 처음부터 다시 시작하는 느낌을 줄임(사진은 안드로이드가 파일 선택 자체를
 // 못 돌려주므로 복구 불가 — 다시 촬영해야 함).
-function saveReportStateBeforeCamera(){
-  try{
-    const state = {
-      ts: Date.now(),
-      type: reportState.type,
-      targetId: reportState.targetId,
-      reason: document.getElementById('reportReason') ? document.getElementById('reportReason').value : '',
-    };
-    localStorage.setItem('reportStateBeforeCamera', JSON.stringify(state));
-  }catch(e){}
-}
-
-function restoreReportStateIfAny(){
-  let raw;
-  try{ raw = localStorage.getItem('reportStateBeforeCamera'); }catch(e){ return; }
-  if(!raw) return;
-  localStorage.removeItem('reportStateBeforeCamera');
-  let state;
-  try{ state = JSON.parse(raw); }catch(e){ return; }
-  if(!state || Date.now() - state.ts > 10*60*1000) return; // 10분 넘게 지난 건 복구 안 함
-
-  // loadRecords()가 끝난 뒤에 markerObjs가 채워지므로, 약간의 지연 후 시도
-  setTimeout(()=>{
-    if(state.type !== 'add' && !(markerObjs[state.targetId] || loadRecords().find(r=>r.id===state.targetId))) return; // 대상이 아예 없어졌으면 복구 포기
-    if(state.type !== 'add') currentMarkerId = state.targetId;
-    openReportFlow(state.type, true);
-    if(document.getElementById('reportReason')) document.getElementById('reportReason').value = state.reason || '';
-    const hint = document.getElementById('reportHint');
-    if(hint) hint.innerHTML = '📷 사진 촬영 중 화면이 새로고침되었습니다. 입력하시던 내용은 복구했으니, <b>사진만 다시 촬영</b>해주세요.';
-  }, 800);
-}
-
 window.addEventListener('load', ()=>{
   // 지도(카카오 SDK)와 무관하게 좌표 데이터는 항상 먼저 불러온다.
   // 이렇게 해야 카카오 로드가 실패해도 관리자 대량수정/엑셀 기능은 계속 쓸 수 있다.
@@ -1074,7 +1042,6 @@ window.addEventListener('load', ()=>{
     // 대시보드가 이미 열려 있었다면(드문 케이스) 표를 최신 데이터로 갱신
     if(document.getElementById('adminDash').classList.contains('show')) buildBulkEditTable();
     // (저장 완료 표시는 이제 저장 시점에만 잠깐 뜨고 사라짐 — 새로고침 간 상태 유지 불필요)
-    restoreReportStateIfAny(); // 민간 제보 중 사진 촬영으로 새로고침됐다면 입력 내용 복구
   });
 
   // 카카오 SDK 로드가 실패해도(앱키 미설정, 도메인 미등록, 네트워크 문제 등)
@@ -2659,9 +2626,8 @@ function openReportFlow(type, skipDebounce){
   // ⚠️ 요청받은 개선 — 신규제보·수정요청·삭제신고 버튼 자체엔 중복 클릭 방지가 없어서,
   // 빠르게 여러 번 누르면 이 함수가 연달아 실행될 수 있었음("몇 번 눌러야 뜬다"는 증상과
   // 관련 있을 수 있음). 짧은 시간(500ms) 안의 재실행은 무시함.
-  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 자동 복구 기능(restoreReportStateIfAny)도
-  // 이 함수를 호출하는데, 그게 이 잠금을 걸어버려서 바로 직후에 사용자가 진짜로 버튼을
-  // 눌러도 무시당하는 문제가 있었음. 복구 호출은 skipDebounce=true로 이 잠금을 건너뜀.
+  // (skipDebounce 매개변수는 예전 자동복구 기능용이었음 — 카메라를 전부 인앱으로
+  // 바꾸면서 그 복구 기능 자체를 제거했지만, 매개변수는 호환을 위해 남겨둠)
   if(!skipDebounce){
     const now = Date.now();
     if(now - _lastOpenReportFlowAt < 500) return;
@@ -4139,7 +4105,6 @@ function finishEnterAdminMode(){
   openAdminDash();
   classifyMissingRegions(); // 관리자가 들어왔을 때만 남은 주소/행정구역 백그라운드 분류 진행
   restoreAdminFormStateIfAny(); // 사진 찍다가 화면이 새로고침돼서 다시 로그인한 경우, 입력하던 내용 복구
-  restoreBulkTableStateIfAny(); // 대량입력/대량수정 표에서 사진 찍다가 재시작된 경우도 복구
 }
 function logoutAdmin(){
   isAdmin = false;
@@ -4759,7 +4724,18 @@ function initBulkNewMapPreview(previewElId){
   // 지도를 가짐)으로 넘어가서 "새로" 만드는 지도는, 그 탭 컨테이너가 아직 숨겨져있거나
   // 크기가 막 잡히는 시점이라 카카오맵이 크기를 0으로 착각해 하얗게 그려지고 있었음.
   // 새로 만들 때도 항상 약간 뒤에 relayout을 불러서 다시 그리게 함.
-  setTimeout(()=>_bulkNewMaps[previewElId].map.relayout(), 0);
+  // ⚠️ 추가 보강 — setTimeout(…,0)만으로는 브라우저가 레이아웃을 완전히 자리잡기 전에
+  // 호출될 수 있어(여전히 하얗게 뜨는 경우가 있었음, 사용자 재확인). requestAnimationFrame
+  // (다음 화면을 그리기 직전 시점)과 약간 더 긴 지연 호출을 함께 써서, 실제 크기가 자리잡은
+  // 뒤에 반드시 한 번 더 재계산되게 함.
+  requestAnimationFrame(()=>{
+    const entry = _bulkNewMaps[previewElId];
+    if(entry) entry.map.relayout();
+  });
+  setTimeout(()=>{
+    const entry = _bulkNewMaps[previewElId];
+    if(entry) entry.map.relayout();
+  }, 150);
   refreshBulkNewMapPreview(previewElId);
 }
 
@@ -4909,11 +4885,6 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     } else {
       msg.textContent = `${toSave.length}건 중 ${failCount}건 저장 실패로 지도에서 제외했습니다. 나머지 ${toSave.length-failCount}건은 정상 등록되었습니다.`; msg.className='msg err';
     }
-    // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 등록이 끝나도 재시작 복구용 스냅샷
-    // (bulkTableStateBeforeCamera)이 안 지워져서, 나중에 아무 이유로 앱을 껐다 켜면
-    // 이미 등록 끝난 옛날 내용이 "복구됐다"며 다시 나타나고 있었음. 등록이 끝나면
-    // (성공·실패 여부와 무관하게, 이 화면 자체를 닫으니까) 지워서 재발하지 않게 함.
-    try{ localStorage.removeItem('bulkTableStateBeforeCamera'); }catch(e){}
     preview.innerHTML='';
     // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 위에서 preview.innerHTML을 비우면 지도가
     // 들어있던 div도 통째로 사라지는데, _bulkNewMaps[previewElId]는 그 사라진(떨어져나간)
@@ -5208,7 +5179,9 @@ function initBulkEditMap(){
     _bulkEditMapClusterer = new kakao.maps.MarkerClusterer({ map: _bulkEditMap, averageCenter: true, minLevel: 8, gridSize: 80 });
   }
   // ⚠️ 대량입력과 같은 이유로, 새로 만들 때도 항상 relayout을 불러서 하얗게 보이는 문제 방지
-  setTimeout(()=>_bulkEditMap.relayout(), 0);
+  // ⚠️ 대량입력과 같은 이유로 보강(requestAnimationFrame + 약간 더 긴 지연 재호출)
+  requestAnimationFrame(()=>{ if(_bulkEditMap) _bulkEditMap.relayout(); });
+  setTimeout(()=>{ if(_bulkEditMap) _bulkEditMap.relayout(); }, 150);
   redrawBulkEditMapMarkers(); // 마커만 다시 그림(시점은 안 건드림)
 }
 
@@ -5386,10 +5359,6 @@ function renderMoreBulkRows(){
 function handleBulkRowPhotoCapture(inputEl, rowEl, previewElId){
   const file = inputEl.files[0];
   if(!file || !rowEl) return;
-  // ⚠️ 카메라 앱이 열리는 동안 앱이 재시작될 수 있어서(운영체제 메모리 관리), 지금 이 표에
-  // 있는 모든 줄의 내용을 미리 저장해둠 — 재시작되면 관리자 로그인 후 자동으로 복구됨.
-  saveBulkTableStateBeforeCamera(rowEl);
-
   // ⚠️ 진짜 버그였던 부분(전수 재검토 중 발견) — 이 경로(표의 "📷 사진 선택")는 예전엔
   // GPS만 뽑고 사진 자체(_bulkRowPhotoStore)는 전혀 저장하지 않아서, 대량입력/대량수정
   // 표에서 갤러리로 사진을 고르면 좌표만 채워지고 사진은 등록 시 통째로 빠졌음(인앱
@@ -5451,59 +5420,6 @@ function handleBulkRowPhotoCapture(inputEl, rowEl, previewElId){
 }
 
 // 대량수정/대량입력 표에서 카메라 열기 직전, 지금 표에 있는 모든 줄의 값을 저장해둠
-function saveBulkTableStateBeforeCamera(rowEl){
-  const table = rowEl.closest('table');
-  if(!table) return;
-  const isBulkEdit = !!table.querySelector('.be-lat');
-  const prefix = isBulkEdit ? 'be' : 'bn';
-  const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => ({
-    id: tr.dataset.id,
-    addr: tr.querySelector(`.${prefix}-addr`)?.value || '',
-    lat: tr.querySelector(`.${prefix}-lat`)?.value || '',
-    lng: tr.querySelector(`.${prefix}-lng`)?.value || '',
-    note: tr.querySelector(`.${prefix}-note`)?.value || ''
-  }));
-  const previewElId = isBulkEdit ? null : table.closest('[id$="Preview"]')?.id;
-  try{
-    localStorage.setItem('bulkTableStateBeforeCamera', JSON.stringify({
-      kind: isBulkEdit ? 'edit' : 'new', previewElId, rows, ts: Date.now()
-    }));
-  }catch(e){}
-}
-
-// 앱이 다시 켜졌을 때(관리자 모드 진입 이후) 대량입력/대량수정 표 내용을 복구함
-function restoreBulkTableStateIfAny(){
-  let raw;
-  try{ raw = localStorage.getItem('bulkTableStateBeforeCamera'); }catch(e){ return; }
-  if(!raw) return;
-  localStorage.removeItem('bulkTableStateBeforeCamera');
-  let state;
-  try{ state = JSON.parse(raw); }catch(e){ return; }
-  if(!state || Date.now() - state.ts > 10*60*1000 || !state.rows?.length) return; // 10분 넘으면 복구 안 함
-
-  if(state.kind === 'edit'){
-    switchTab('bulkEdit');
-    // 서버에서 다시 불러온 목록에, 저장해뒀던 값(수정 중이던 내용)을 덮어씌워서 표에 그대로 반영
-    setTimeout(()=>{
-      state.rows.forEach(r=>{
-        const tr = document.querySelector(`#bulkEditBody tr[data-id="${r.id}"]`);
-        if(tr){
-          tr.querySelector('.be-addr').value = r.addr;
-          tr.querySelector('.be-lat').value = r.lat;
-          tr.querySelector('.be-lng').value = r.lng;
-          tr.querySelector('.be-note').value = r.note;
-        }
-      });
-      alert('사진 촬영 중 화면이 새로고침되어, 대량수정 표에 입력하던 내용을 복구했습니다.');
-    }, 300); // 표가 먼저 그려질 시간을 살짝 줌
-  } else if(state.kind === 'new' && state.previewElId){
-    switchTab('bulkNew');
-    const msgElId = state.previewElId === 'bulkPreview' ? 'bulkNewMsg' : 'bulkNewFileMsg';
-    renderBulkNewPreviewTable(state.rows.map(r=>({...r, lat:parseFloat(r.lat), lng:parseFloat(r.lng)})), state.previewElId, msgElId, '복구됨');
-    alert('사진 촬영 중 화면이 새로고침되어, 대량입력 표에 입력하던 내용을 복구했습니다.');
-  }
-}
-
 async function quickDelete(id){
   if(!confirm('이 구조함을 삭제할까요?')) return;
   const rec = markerObjs[id]?.record || loadRecords().find(r=>r.id===id) || {};
@@ -5572,8 +5488,6 @@ async function saveBulkEdit(){
     }
   });
   await Promise.all(photoUploads); // 모든 사진 업로드가 실제로 끝날 때까지 기다림
-  // ⚠️ 대량입력과 같은 이유로 여기도 재시작 복구용 스냅샷을 지움(아래 참고)
-  try{ localStorage.removeItem('bulkTableStateBeforeCamera'); }catch(e){}
   clusterer.redraw();
   if(updated>0){
     classifyMissingRegions();
