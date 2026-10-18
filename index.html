@@ -1176,10 +1176,12 @@ async function initMap(){
     // 안에 들어간 마커는 항상 정상적으로 묶일 수 있게 함.
     minLevel: 1,
     // ⚠️ 진짜 원인이었음(사용자가 발견함, 계산으로 확인) — gridSize는 줌 레벨과 상관없이
-    // 항상 고정된 "화면 픽셀" 거리인데, 축척이 넓어지면(250m 등) 같은 120픽셀이라도 실제
-    // 거리로는 최대 77m까지 벌어져서, 사용자가 "근처"라고 느끼는 범위보다 훨씬 넓게 묶여
-    // 숫자가 부풀려 보이는 문제가 있었음. 60으로 줄여서 묶이는 실제 거리 자체를 절반으로 줄임.
-    gridSize: 60,
+    // 항상 고정된 "화면 픽셀" 거리인데, 축척이 넓어지면(250m 등) 같은 픽셀 수라도 실제
+    // 거리로는 훨씬 넓게 벌어져서, 사용자가 "근처"라고 느끼는 범위보다 넓게 묶여 숫자가
+    // 부풀려 보이는 문제가 있었음. 120→60으로 한 번 줄였는데도 250m에서 여전히 넓다는
+    // 재확인(2개로 보이는데 18개로 뜸)이 있어서, 30으로 추가로 줄임(250m 기준 실제
+    // 약 19m 반경).
+    gridSize: 30,
     disableClickZoom: false,
     calculator: [10, 50, 100],
     // ⚠️ 색깔만으로 인명구조함 클러스터(원형)와 구별하면 색맹이거나 화면이 어두운 환경에서
@@ -4751,9 +4753,13 @@ function initBulkNewMapPreview(previewElId){
     const map = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(36.5, 127.8), level: 12 });
     const clusterer = new kakao.maps.MarkerClusterer({ map, averageCenter: true, minLevel: 8, gridSize: 80 });
     _bulkNewMaps[previewElId] = { map, clusterer };
-  } else {
-    setTimeout(()=>_bulkNewMaps[previewElId].map.relayout(), 0); // 숨겨져 있다가 다시 보일 때 크기 재계산
   }
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 예전엔 "이미 있던 지도"만 relayout(크기
+  // 재계산)을 불렀음. 근데 두 번째, 세 번째 탭(붙여넣기/엑셀/표직접입력 각각 자기
+  // 지도를 가짐)으로 넘어가서 "새로" 만드는 지도는, 그 탭 컨테이너가 아직 숨겨져있거나
+  // 크기가 막 잡히는 시점이라 카카오맵이 크기를 0으로 착각해 하얗게 그려지고 있었음.
+  // 새로 만들 때도 항상 약간 뒤에 relayout을 불러서 다시 그리게 함.
+  setTimeout(()=>_bulkNewMaps[previewElId].map.relayout(), 0);
   refreshBulkNewMapPreview(previewElId);
 }
 
@@ -4806,7 +4812,15 @@ function _doRefreshBulkNewMapPreview(previewElId){
 function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extraOnDone){
   const preview = document.getElementById(previewElId);
   const msg = document.getElementById(msgElId);
-  if(!parsed.length){ preview.innerHTML=''; return; }
+  if(!parsed.length){ preview.innerHTML=''; delete _bulkNewMaps[previewElId]; return; }
+
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 줄을 추가/삭제할 때마다 이 함수가 표 전체
+  // (지도 칸 포함)를 통째로 다시 그리는데, 그러면 지도가 들어있던 div 자체가 사라지고
+  // 새로 생김. 근데 _bulkNewMaps[previewElId]는 그 사라진(이제 화면에 없는) 지도 객체를
+  // 계속 붙잡고 있어서, initBulkNewMapPreview가 "이미 있다"고 착각해 새 빈 칸에는 지도를
+  // 아예 새로 안 만들었음(그래서 하얗게 보임). 매번 다시 그리기 직전에 이 참조를 지워서,
+  // 항상 새 칸에 새 지도가 제대로 붙게 함.
+  delete _bulkNewMaps[previewElId];
 
   preview.innerHTML = `
     <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">${parsed.length}건 — 아래에서 확인·수정 후 등록하세요</div>
@@ -5192,9 +5206,9 @@ function initBulkEditMap(){
     const center = (map ? map.getCenter() : new kakao.maps.LatLng(37.78, 128.95));
     _bulkEditMap = new kakao.maps.Map(container, { center, level: 6 });
     _bulkEditMapClusterer = new kakao.maps.MarkerClusterer({ map: _bulkEditMap, averageCenter: true, minLevel: 8, gridSize: 80 });
-  } else {
-    setTimeout(()=>_bulkEditMap.relayout(), 0);
   }
+  // ⚠️ 대량입력과 같은 이유로, 새로 만들 때도 항상 relayout을 불러서 하얗게 보이는 문제 방지
+  setTimeout(()=>_bulkEditMap.relayout(), 0);
   redrawBulkEditMapMarkers(); // 마커만 다시 그림(시점은 안 건드림)
 }
 
