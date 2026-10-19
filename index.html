@@ -1486,7 +1486,12 @@ async function classifyMissingRegions(){
   // addr이 영원히 빈 값임. 예전엔 "addr이 비었으면 대상"으로 잡아서, 그런 좌표 1,500여 건을
   // 새로고침할 때마다 무한 반복 조회하는 문제가 있었음.
   // → 조회를 한 번이라도 끝낸 항목은 geocodedAt(조회 시각)을 남기고, 그 값이 있으면 다시 안 함.
-  const todo = loadRecords().filter(r=>!r.geocodedAt && (!r.region || !r.addr));
+  // ⚠️ 진짜 원인이었음(사용자가 발견함) — geocodedAt이 한 번이라도 찍히면 다시는 재시도
+  // 대상이 안 됐음. 주소(addr)는 바다 위 좌표처럼 "영원히 못 찾는" 경우가 실제로 있어서
+  // 이 잠금이 맞지만, 지역(region)은 다름 — 위경도 범위표(최후 방어선)로 거의 항상 최소한
+  // 시/도는 판정 가능함. "기타"로 찍힌 건 3단계 방어 로직 만들기 전이거나 일시적 오류였을
+  // 가능성이 높으므로, region이 '기타'인 것은 geocodedAt이 있어도 다시 시도 대상에 넣음.
+  const todo = loadRecords().filter(r=>(!r.geocodedAt && (!r.region || !r.addr)) || r.region === '기타');
   if(!todo.length) return;
   _classifyInProgress = true;
   const progress = document.getElementById('classifyProgress');
