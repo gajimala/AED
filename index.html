@@ -388,6 +388,14 @@
   <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작: </div>
 </div>
 
+<!-- 공지사항 전광판(자리 거의 안 차지, 내용 없으면 자동으로 숨김) -->
+<div id="noticeTicker" style="display:none;position:fixed;top:env(safe-area-inset-top,0px);left:0;right:0;height:26px;background:var(--navy,#1F3A5F);color:#fff;z-index:600;overflow:hidden;white-space:nowrap;">
+  <div id="noticeTickerInner" style="display:inline-block;padding-left:100%;font-size:12.5px;line-height:26px;"></div>
+</div>
+<style>
+@keyframes noticeTickerScroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+</style>
+
 <!-- 지도 -->
 <div id="map"></div>
 <div id="mapError"></div>
@@ -695,6 +703,7 @@
     <div class="tab" data-tab="requests" onclick="switchTab('requests')">수정요청<span id="reqBadge" class="count-pill" style="display:none;"></span></div>
     <div class="tab" data-tab="history" onclick="switchTab('history')">변경이력</div>
     <div class="tab" data-tab="backup" onclick="switchTab('backup')">백업</div>
+    <div class="tab" data-tab="notice" onclick="switchTab('notice')">공지</div>
   </div>
   <div class="dash-body">
 
@@ -871,6 +880,17 @@
       </div>
     </div>
 
+    <!-- 공지사항 -->
+    <div class="panel" id="panel-notice">
+      <div class="card">
+        <div class="hint">여기에 입력한 내용이 <b>모든 사용자 화면 위쪽에 전광판처럼 흘러가는 띠</b>로 보입니다. 비워두고 저장하면 전광판 자체가 사라집니다.</div>
+        <textarea id="noticeInput" rows="3" placeholder="예: 10월 25일 오전 2시~4시 서버 점검이 있습니다." style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
+        <button class="btn btn-orange" style="margin-top:10px;" onclick="saveNoticeFromAdmin()">📢 공지 저장</button>
+        <button class="btn btn-ghost" style="margin-top:10px;" onclick="document.getElementById('noticeInput').value=''; saveNoticeFromAdmin();">🗑 공지 지우기</button>
+        <div class="msg" id="noticeMsg"></div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -898,6 +918,25 @@ const _loadedPromise = new Promise(res=>{ _resolveLoaded = res; });
 // 똑같은 문제). 그래서 관리자 본인 기기에선 방금 수정한 최신값이 메모리에 남아있어 바로
 // 반영된 것처럼 보이지만, 새로고침하거나 다른 기기에서 접속하면 CDN에 남아있던 예전 버전
 // (예: lastEditSource가 아직 'civilian'이던 시절)을 계속 받아오는 문제가 있었음.
+// 공지사항 전광판 — 특수 레코드(SYS_NOTICE_ID)에 내용이 있으면 화면 위에 얇게 흘러가는
+// 띠로 보여주고, 없으면(관리자가 공지를 비워뒀으면) 자리 자체를 아예 차지하지 않음.
+function refreshNoticeTicker(){
+  const notice = getSysNoticeRecord();
+  const text = (notice?.note || '').trim();
+  const bar = document.getElementById('noticeTicker');
+  const inner = document.getElementById('noticeTickerInner');
+  if(!text){
+    bar.style.display = 'none';
+    inner.style.animation = '';
+    return;
+  }
+  bar.style.display = 'block';
+  inner.textContent = `📢 ${text}`;
+  // 글자 수에 비례해서 흐르는 시간을 조절(짧은 글은 너무 빨리, 긴 글은 너무 느리지 않게)
+  const seconds = Math.max(10, text.length * 0.3);
+  inner.style.animation = `noticeTickerScroll ${seconds}s linear infinite`;
+}
+
 async function ensureLoaded(){
   if(_cache) return _cache;
   try{
@@ -909,9 +948,35 @@ async function ensureLoaded(){
     _cache = [];
   }
   if(_resolveLoaded){ _resolveLoaded(_cache); _resolveLoaded = null; }
+  refreshNoticeTicker();
   return _cache;
 }
-function loadRecords(){ return _cache || []; }
+const SYS_NOTICE_ID = '__sys_notice__'; // 공지사항 저장용 특수 레코드 id(워커를 안 건드리고, 기존 저장 기능을 재사용하기 위함)
+function loadRecords(){ return (_cache || []).filter(r => r.id !== SYS_NOTICE_ID); } // 특수 레코드는 일반 목록에서 항상 제외
+function getSysNoticeRecord(){ return (_cache || []).find(r => r.id === SYS_NOTICE_ID) || null; }
+
+// ⚠️ upsertRecord를 그대로 쓰면, 그 안에서 loadRecords()로 "이미 있는지" 확인하는데
+// loadRecords()가 이제 이 특수 레코드를 걸러내므로 매번 "새 레코드"로 착각해서 중복
+// 생성될 위험이 있었음. 그래서 원본(_cache)을 직접 확인하는 전용 저장 함수를 따로 둠.
+async function saveSysNotice(text){
+  const rawList = _cache || [];
+  const existing = rawList.find(r => r.id === SYS_NOTICE_ID);
+  const rec = existing
+    ? { ...existing, note: text, updatedAt: Date.now() }
+    : { id: SYS_NOTICE_ID, lat: 0, lng: 0, addr: '(시스템 전용 — 공지사항 저장용, 지도에 안 보임)', note: text, updatedAt: Date.now() };
+  const isNew = !existing;
+  const url = isNew ? `${WORKER_URL}/lifesavers` : `${WORKER_URL}/lifesavers/${rec.id}`;
+  const res = await fetch(url, {
+    method: isNew ? 'POST' : 'PUT',
+    headers: { 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
+    body: JSON.stringify(rec)
+  });
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  // 로컬 캐시도 즉시 반영(다음 로딩을 기다리지 않고 바로 전광판에 반영되게)
+  const idx = rawList.findIndex(r => r.id === SYS_NOTICE_ID);
+  if(idx === -1) _cache = [...rawList, rec]; else { _cache = [...rawList]; _cache[idx] = rec; }
+  return rec;
+}
 
 // 화면 반응은 즉시(낙관적 갱신), 실제 저장은 Worker를 거쳐 GitHub에 커밋됨.
 // 저장 실패 시(네트워크 문제, Worker 미배포 등) 사용자에게 바로 알림.
@@ -4136,6 +4201,22 @@ function switchTab(name){
   if(name==='history') renderHistoryList();
   if(name==='new') initNewMapPicker();
   if(name==='backup') renderBackupList();
+  if(name==='notice') document.getElementById('noticeInput').value = getSysNoticeRecord()?.note || '';
+}
+
+// 관리자가 공지 탭에서 저장/지우기 버튼을 눌렀을 때 호출됨
+async function saveNoticeFromAdmin(){
+  const msg = document.getElementById('noticeMsg');
+  const text = document.getElementById('noticeInput').value;
+  msg.textContent = '저장 중…'; msg.className = 'msg ok'; msg.style.display = 'block';
+  try{
+    await saveSysNotice(text);
+    refreshNoticeTicker();
+    msg.textContent = text.trim() ? '저장되었습니다. 전광판에 반영되었습니다.' : '공지를 지웠습니다.';
+  }catch(e){
+    msg.textContent = '저장 실패: ' + e.message;
+    msg.className = 'msg err';
+  }
 }
 
 /* ---------------- 백업 / 복구 ---------------- */
