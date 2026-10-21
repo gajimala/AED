@@ -67,7 +67,7 @@
 
   /* ---------- 좌측 상단 행정구역 필터 ---------- */
   #regionBar{
-    position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
+    position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     display:flex;align-items:center;flex-wrap:nowrap;max-width:calc(100vw - 28px);
   }
   #regionBar select{
@@ -101,20 +101,20 @@
     cursor:pointer;
   }
   #myLocationEntry{
-    position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
+    position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     width:40px;height:40px;border-radius:50%;background:var(--navy);color:#fff;
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
   }
   #skyviewEntry{
-    position:fixed;right:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
+    position:fixed;right:14px;top:calc(62px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     width:40px;height:40px;border-radius:50%;background:#fff;color:var(--navy);
     border:2px solid var(--line);box-shadow:0 3px 12px rgba(0,0,0,.18);cursor:pointer;
     display:flex;align-items:center;justify-content:center;font-size:18px;
   }
   #skyviewEntry.on{ background:var(--navy); border-color:#fff; }
   #nearestEntry{
-    position:fixed;left:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
+    position:fixed;left:14px;top:calc(62px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     height:clamp(30px,8.5vw,46px);padding:0 clamp(8px,2.4vw,18px);border-radius:20px;background:var(--orange);color:#fff;
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
@@ -183,7 +183,7 @@
   #syncStatus.timeout{background:#5B6B76;}
 
   /* ---------- 지도 ---------- */
-  #map{position:fixed;inset:0;}
+  #map{position:fixed;top:var(--notice-h,0px);left:0;right:0;bottom:0;}
 
   /* ---------- 우측 하단 관리자 아이콘 ---------- */
   #adminEntry{
@@ -928,6 +928,8 @@ function refreshNoticeTicker(){
   if(!text){
     bar.style.display = 'none';
     inner.style.animation = '';
+    document.documentElement.style.setProperty('--notice-h', '0px');
+    if(typeof map !== 'undefined' && map) setTimeout(()=>map.relayout(), 0);
     return;
   }
   bar.style.display = 'block';
@@ -935,6 +937,11 @@ function refreshNoticeTicker(){
   // 글자 수에 비례해서 흐르는 시간을 조절(짧은 글은 너무 빨리, 긴 글은 너무 느리지 않게)
   const seconds = Math.max(10, text.length * 0.3);
   inner.style.animation = `noticeTickerScroll ${seconds}s linear infinite`;
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 전광판을 position:fixed로 그냥 얹어서,
+  // 기존 아이콘·지도를 아래로 밀어내지 않고 그 위에 그냥 덮어씌워지고 있었음. CSS 변수로
+  // 전광판 높이만큼 다른 요소들도 같이 내려가게 함.
+  document.documentElement.style.setProperty('--notice-h', '26px');
+  if(typeof map !== 'undefined' && map) setTimeout(()=>map.relayout(), 0);
 }
 
 async function ensureLoaded(){
