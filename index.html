@@ -67,7 +67,7 @@
 
   /* ---------- 좌측 상단 행정구역 필터 ---------- */
   #regionBar{
-    position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
+    position:fixed;left:14px;top:calc(14px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     display:flex;align-items:center;flex-wrap:nowrap;max-width:calc(100vw - 28px);
   }
   #regionBar select{
@@ -101,20 +101,20 @@
     cursor:pointer;
   }
   #myLocationEntry{
-    position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top));z-index:500;
+    position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     width:40px;height:40px;border-radius:50%;background:var(--navy);color:#fff;
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
   }
   #skyviewEntry{
-    position:fixed;right:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
+    position:fixed;right:14px;top:calc(62px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     width:40px;height:40px;border-radius:50%;background:#fff;color:var(--navy);
     border:2px solid var(--line);box-shadow:0 3px 12px rgba(0,0,0,.18);cursor:pointer;
     display:flex;align-items:center;justify-content:center;font-size:18px;
   }
   #skyviewEntry.on{ background:var(--navy); border-color:#fff; }
   #nearestEntry{
-    position:fixed;left:14px;top:calc(62px + env(safe-area-inset-top));z-index:500;
+    position:fixed;left:14px;top:calc(62px + env(safe-area-inset-top) + var(--notice-h,0px));z-index:500;
     height:clamp(30px,8.5vw,46px);padding:0 clamp(8px,2.4vw,18px);border-radius:20px;background:var(--orange);color:#fff;
     border:2px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,.22);cursor:pointer;
     display:flex;align-items:center;justify-content:center;
@@ -183,7 +183,7 @@
   #syncStatus.timeout{background:#5B6B76;}
 
   /* ---------- 지도 ---------- */
-  #map{position:fixed;inset:0;}
+  #map{position:fixed;top:var(--notice-h,0px);left:0;right:0;bottom:0;}
 
   /* ---------- 우측 하단 관리자 아이콘 ---------- */
   #adminEntry{
@@ -387,6 +387,14 @@
   <p>카카오맵 불러오는 중…</p>
   <div id="splashCredit">데이터 출처: 해양경찰청 · 국립중앙의료원(중앙응급의료센터)<br>제작: </div>
 </div>
+
+<!-- 공지사항 전광판(자리 거의 안 차지, 내용 없으면 자동으로 숨김) -->
+<div id="noticeTicker" style="display:none;position:fixed;top:env(safe-area-inset-top,0px);left:0;right:0;height:26px;background:var(--navy,#1F3A5F);color:#fff;z-index:600;overflow:hidden;white-space:nowrap;">
+  <div id="noticeTickerInner" style="display:inline-block;padding-left:100%;font-size:12.5px;line-height:26px;"></div>
+</div>
+<style>
+@keyframes noticeTickerScroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+</style>
 
 <!-- 지도 -->
 <div id="map"></div>
@@ -695,6 +703,7 @@
     <div class="tab" data-tab="requests" onclick="switchTab('requests')">수정요청<span id="reqBadge" class="count-pill" style="display:none;"></span></div>
     <div class="tab" data-tab="history" onclick="switchTab('history')">변경이력</div>
     <div class="tab" data-tab="backup" onclick="switchTab('backup')">백업</div>
+    <div class="tab" data-tab="notice" onclick="switchTab('notice')">공지</div>
   </div>
   <div class="dash-body">
 
@@ -847,6 +856,8 @@
           <option value="all">소속 해양경찰서: 전체</option>
         </select>
         <div style="font-size:12px;color:var(--ink-soft);margin:8px 0;">전체 <b id="historyCount">0</b>건</div>
+        <button class="btn btn-ghost btn-sm" onclick="backfillMissingHistoryPhotos()">🔄 사진 없는 과거 이력에 사진 소급 채우기</button>
+        <div class="msg" id="backfillMsg"></div>
         <div class="row" id="historySelectionBar" style="gap:8px;margin-bottom:8px;display:none;">
           <span class="count-pill" id="historySelectedCount">0개 선택됨</span>
           <button class="btn btn-danger btn-sm" onclick="deleteSelectedHistoryEntries()">선택 삭제</button>
@@ -868,6 +879,17 @@
         <div class="hint">AED 지역별 뱃지 숫자(<b>aed_summary.json</b>)는 CPU 절약을 위해 더 이상 자동으로 갱신되지 않습니다. 지역별 개수가 실제와 다르게 보이면, 아래 버튼으로 지금 저장된 데이터 기준으로 즉시 다시 계산할 수 있습니다.</div>
         <button class="btn btn-orange" onclick="recomputeAedSummaryNow()">🔄 AED 요약 지금 다시 계산하기</button>
         <div class="msg" id="recomputeSummaryMsg"></div>
+      </div>
+    </div>
+
+    <!-- 공지사항 -->
+    <div class="panel" id="panel-notice">
+      <div class="card">
+        <div class="hint">여기에 입력한 내용이 <b>모든 사용자 화면 위쪽에 전광판처럼 흘러가는 띠</b>로 보입니다. 비워두고 저장하면 전광판 자체가 사라집니다.</div>
+        <textarea id="noticeInput" rows="3" placeholder="예: 10월 25일 오전 2시~4시 서버 점검이 있습니다." style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
+        <button class="btn btn-orange" style="margin-top:10px;" onclick="saveNoticeFromAdmin()">📢 공지 저장</button>
+        <button class="btn btn-ghost" style="margin-top:10px;" onclick="document.getElementById('noticeInput').value=''; saveNoticeFromAdmin();">🗑 공지 지우기</button>
+        <div class="msg" id="noticeMsg"></div>
       </div>
     </div>
 
@@ -898,6 +920,32 @@ const _loadedPromise = new Promise(res=>{ _resolveLoaded = res; });
 // 똑같은 문제). 그래서 관리자 본인 기기에선 방금 수정한 최신값이 메모리에 남아있어 바로
 // 반영된 것처럼 보이지만, 새로고침하거나 다른 기기에서 접속하면 CDN에 남아있던 예전 버전
 // (예: lastEditSource가 아직 'civilian'이던 시절)을 계속 받아오는 문제가 있었음.
+// 공지사항 전광판 — 특수 레코드(SYS_NOTICE_ID)에 내용이 있으면 화면 위에 얇게 흘러가는
+// 띠로 보여주고, 없으면(관리자가 공지를 비워뒀으면) 자리 자체를 아예 차지하지 않음.
+function refreshNoticeTicker(){
+  const notice = getSysNoticeRecord();
+  const text = (notice?.note || '').trim();
+  const bar = document.getElementById('noticeTicker');
+  const inner = document.getElementById('noticeTickerInner');
+  if(!text){
+    bar.style.display = 'none';
+    inner.style.animation = '';
+    document.documentElement.style.setProperty('--notice-h', '0px');
+    if(typeof map !== 'undefined' && map) setTimeout(()=>map.relayout(), 0);
+    return;
+  }
+  bar.style.display = 'block';
+  inner.textContent = `📢 ${text}`;
+  // 글자 수에 비례해서 흐르는 시간을 조절(짧은 글은 너무 빨리, 긴 글은 너무 느리지 않게)
+  const seconds = Math.max(10, text.length * 0.3);
+  inner.style.animation = `noticeTickerScroll ${seconds}s linear infinite`;
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 전광판을 position:fixed로 그냥 얹어서,
+  // 기존 아이콘·지도를 아래로 밀어내지 않고 그 위에 그냥 덮어씌워지고 있었음. CSS 변수로
+  // 전광판 높이만큼 다른 요소들도 같이 내려가게 함.
+  document.documentElement.style.setProperty('--notice-h', '26px');
+  if(typeof map !== 'undefined' && map) setTimeout(()=>map.relayout(), 0);
+}
+
 async function ensureLoaded(){
   if(_cache) return _cache;
   try{
@@ -909,9 +957,49 @@ async function ensureLoaded(){
     _cache = [];
   }
   if(_resolveLoaded){ _resolveLoaded(_cache); _resolveLoaded = null; }
+  refreshNoticeTicker();
   return _cache;
 }
-function loadRecords(){ return _cache || []; }
+const SYS_NOTICE_ID = '__sys_notice__'; // 공지사항 저장용 특수 레코드 id(워커를 안 건드리고, 기존 저장 기능을 재사용하기 위함)
+function loadRecords(){ return (_cache || []).filter(r => r.id !== SYS_NOTICE_ID); } // 특수 레코드는 일반 목록에서 항상 제외
+function getSysNoticeRecord(){
+  // 혹시 서버에 같은 id가 중복으로 들어가 있어도(예전 버그로 생겼을 수 있음) 가장 최근 것을 사용함
+  const all = (_cache || []).filter(r => r.id === SYS_NOTICE_ID);
+  if(!all.length) return null;
+  return all.reduce((a, b) => ((b.updatedAt||0) >= (a.updatedAt||0) ? b : a));
+}
+// ⚠️ 진짜 버그였던 부분(전수 재점검 중 발견) — 저장·삭제 함수들이 loadRecords()(공지 레코드를 걸러냄)로
+// 목록을 만든 뒤 _cache를 통째로 덮어써서, 구조함을 하나만 저장해도 공지 레코드가 로컬 캐시에서
+// 사라졌음. 그러면 공지 탭이 빈 칸으로 보이고, 저장 시 서버에 같은 id가 중복 생성됨. 덮어쓰기 직전에
+// 이 함수로 감싸서 공지 레코드를 항상 함께 보존함(반드시 _cache를 덮어쓰기 "전에" 호출할 것).
+function keepSysNotice(list){
+  const notice = getSysNoticeRecord();
+  return notice ? [...list, notice] : list;
+}
+
+// ⚠️ upsertRecord를 그대로 쓰면, 그 안에서 loadRecords()로 "이미 있는지" 확인하는데
+// loadRecords()가 이제 이 특수 레코드를 걸러내므로 매번 "새 레코드"로 착각해서 중복
+// 생성될 위험이 있었음. 그래서 원본(_cache)을 직접 확인하는 전용 저장 함수를 따로 둠.
+async function saveSysNotice(text){
+  const rawList = _cache || [];
+  const existing = rawList.find(r => r.id === SYS_NOTICE_ID);
+  const rec = existing
+    ? { ...existing, note: text, updatedAt: Date.now() }
+    : { id: SYS_NOTICE_ID, lat: 0, lng: 0, addr: '(시스템 전용 — 공지사항 저장용, 지도에 안 보임)', note: text, updatedAt: Date.now() };
+  // ⚠️ 로컬 캐시에 없다고 해서 서버에도 없는 건 아님(캐시가 오래됐거나 다른 기기에서 먼저 만들었을 수
+  // 있음). 그래서 항상 PUT(수정)부터 시도하고, 서버가 "그런 id 없음(404)"이라고 할 때만 POST(생성)함.
+  // 서버 handleCreate는 중복 검사를 안 하므로, 이렇게 해야 공지 레코드가 두 개로 늘어나지 않음.
+  const headers = { 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE };
+  let res = await fetch(`${WORKER_URL}/lifesavers/${rec.id}`, { method:'PUT', headers, body: JSON.stringify(rec) });
+  if(res.status === 404){
+    res = await fetch(`${WORKER_URL}/lifesavers`, { method:'POST', headers, body: JSON.stringify(rec) });
+  }
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  // 로컬 캐시도 즉시 반영(다음 로딩을 기다리지 않고 바로 전광판에 반영되게)
+  const idx = rawList.findIndex(r => r.id === SYS_NOTICE_ID);
+  if(idx === -1) _cache = [...rawList, rec]; else { _cache = [...rawList]; _cache[idx] = rec; }
+  return rec;
+}
 
 // 화면 반응은 즉시(낙관적 갱신), 실제 저장은 Worker를 거쳐 GitHub에 커밋됨.
 // 저장 실패 시(네트워크 문제, Worker 미배포 등) 사용자에게 바로 알림.
@@ -944,7 +1032,7 @@ async function upsertRecord(rec){
   const isNew = i === -1;
   rec.updatedAt = Date.now();
   if(!isNew) list[i] = {...list[i], ...rec}; else list.push(rec);
-  _cache = list; // 여기까지는 항상 동기적으로 즉시 실행됨(아래 await 전) — 기존 호출부(기다리지 않는 곳들)는 그대로 동작
+  _cache = keepSysNotice(list); // 여기까지는 항상 동기적으로 즉시 실행됨(아래 await 전) — 기존 호출부(기다리지 않는 곳들)는 그대로 동작
   const url = isNew ? `${WORKER_URL}/lifesavers` : `${WORKER_URL}/lifesavers/${rec.id}`;
   try{
     const res = await fetch(url, {
@@ -956,7 +1044,7 @@ async function upsertRecord(rec){
     showSyncDone();
   }catch(e){
     console.error('서버 저장 실패', e);
-    _cache = before; // ⚠️ 서버 저장이 실제로는 실패했으므로, 화면 데이터도 저장 전 상태로 되돌림(화면·서버 불일치 방지)
+    _cache = keepSysNotice(before); // ⚠️ 서버 저장이 실제로는 실패했으므로, 화면 데이터도 저장 전 상태로 되돌림(화면·서버 불일치 방지)
     alert('서버 저장에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면 표시를 원래대로 되돌렸습니다.');
     throw e; // await하는 쪽(예: revertChange)이 실패를 알 수 있게 전달
   }
@@ -964,14 +1052,14 @@ async function upsertRecord(rec){
 }
 async function deleteRecord(id){
   const before = loadRecords(); // ⚠️ 실패 시 되돌리기 위해 삭제 전 상태를 기억해둠
-  _cache = before.filter(r=>r.id!==id);
+  _cache = keepSysNotice(before.filter(r=>r.id!==id));
   try{
     const res = await fetch(`${WORKER_URL}/lifesavers/${id}`, { method:'DELETE', headers:{ 'X-Admin-Code': ADMIN_CODE } });
     if(!res.ok) throw new Error('HTTP '+res.status);
     showSyncDone();
   }catch(e){
     console.error('서버 삭제 실패', e);
-    _cache = before; // ⚠️ 서버 삭제가 실제로는 실패했으므로, 화면도 삭제 전 상태로 되돌림(화면·서버 불일치 방지)
+    _cache = keepSysNotice(before); // ⚠️ 서버 삭제가 실제로는 실패했으므로, 화면도 삭제 전 상태로 되돌림(화면·서버 불일치 방지)
     alert('서버 삭제에 실패했습니다(네트워크 또는 Worker 설정을 확인해주세요). 화면 표시를 원래대로 되돌렸습니다.');
     throw e; // await하는 쪽이 실패를 알 수 있게 전달
   }
@@ -1478,6 +1566,8 @@ function estimateSidoByLatLng(lat, lng){
 }
 
 let _classifyInProgress = false; // 관리자가 여러 액션을 연달아 하면 매번 이 함수가 다시 불리는데, 이미 돌고 있으면 또 시작하지 않게 막음(저장 충돌 방지)
+// '기타'로 남아있던 항목을 딱 한 번 재분류하기 위한 기준 시각(이 시각 이전에 조회가 끝난 것만 재시도)
+const REGION_RETRY_BEFORE = Date.parse('2026-11-01T00:00:00+09:00');
 async function classifyMissingRegions(){
   if(!isAdmin) return; // 관리자 코드가 필요한 쓰기 작업이라 방어적으로 한 번 더 막음(일반 방문자 브라우저에서 절대 안 돌게)
   if(_classifyInProgress) return;
@@ -1491,7 +1581,15 @@ async function classifyMissingRegions(){
   // 이 잠금이 맞지만, 지역(region)은 다름 — 위경도 범위표(최후 방어선)로 거의 항상 최소한
   // 시/도는 판정 가능함. "기타"로 찍힌 건 3단계 방어 로직 만들기 전이거나 일시적 오류였을
   // 가능성이 높으므로, region이 '기타'인 것은 geocodedAt이 있어도 다시 시도 대상에 넣음.
-  const todo = loadRecords().filter(r=>(!r.geocodedAt && (!r.region || !r.addr)) || r.region === '기타');
+  // ⚠️ 재점검 중 발견한 부작용 — 예전엔 region이 '기타'이기만 하면 무조건 대상이라, 재시도해도 또
+  // '기타'인 항목(범위표에도 안 걸리는 좌표 등)은 관리자가 들어올 때마다 계속 같은 내용을 서버에
+  // 다시 커밋했음. 이제 "이 기준 시각 이전에 조회가 끝난 '기타'"만 대상으로 잡고, 재시도 때 geocodedAt이
+  // 지금 시각으로 갱신(서버에 저장됨)되므로 항목당 딱 한 번만 재시도됨. 워커가 저장해주는 기존
+  // 필드(geocodedAt)만 쓰므로 워커 수정이 필요 없음.
+  const todo = loadRecords().filter(r=>
+    (!r.geocodedAt && (!r.region || !r.addr)) ||
+    (r.region === '기타' && (r.geocodedAt || 0) < REGION_RETRY_BEFORE)
+  );
   if(!todo.length) return;
   _classifyInProgress = true;
   const progress = document.getElementById('classifyProgress');
@@ -2522,6 +2620,43 @@ function updateHistorySelectionBar(){
 
 // 체크된 이력들을 한 번에 삭제 — 관리자 코드는 한 번만 묻고, 하나씩 순서대로 삭제함
 // (lifesavers.json 동시수정 충돌 때와 같은 이유로, 여러 건을 한꺼번에 병렬로 보내지 않음)
+// 과거 이력 중 사진이 없는 것들(관리자 신규입력/좌표수정, 단일 건)을 찾아서, 그 구조함
+// 자체에 올라가있는 사진(uploadAdminPhotoIfAny로 당시 실제로 업로드는 됐던 것)을 가져와
+// 이력에도 소급으로 채워넣음. worker.js의 handleResolveReport가 photoDataUrl만 보내면
+// status/resolvedAt을 안 건드리도록 이미 고쳐져있어서, 이 호출로 다른 값은 안 바뀜.
+async function backfillMissingHistoryPhotos(){
+  const msg = document.getElementById('backfillMsg');
+  const targets = loadRequests().filter(r =>
+    r.source === 'admin' && !r.photoDataUrl &&
+    (r.type === 'add' || r.type === 'edit') &&
+    typeof r.targetId === 'string' // 대량작업(배열/null)은 특정 사진 하나로 대응이 안 되므로 제외
+  );
+  if(!targets.length){ msg.textContent = '사진이 없는 이력이 없습니다.'; msg.className = 'msg ok'; msg.style.display = 'block'; return; }
+
+  let filled = 0, noPhoto = 0, fail = 0;
+  for(let i=0; i<targets.length; i++){
+    msg.textContent = `확인 중… (${i+1}/${targets.length})`; msg.className = 'msg ok'; msg.style.display = 'block';
+    try{
+      const res = await fetch(`${WORKER_URL}/lifesaver-photo/${targets[i].targetId}`);
+      if(!res.ok){ noPhoto++; continue; } // 그 구조함 자체에도 사진이 없음(애초에 안 찍었거나 이미 지워짐)
+      const data = await res.json();
+      if(!data.photoDataUrl){ noPhoto++; continue; }
+      const putRes = await fetch(`${WORKER_URL}/reports/${targets[i].id}`, {
+        method:'PUT', headers:{ 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
+        body: JSON.stringify({ photoDataUrl: data.photoDataUrl })
+      });
+      if(!putRes.ok) throw new Error('HTTP '+putRes.status);
+      targets[i].photoDataUrl = data.photoDataUrl; // 로컬 캐시도 바로 반영
+      filled++;
+    }catch(e){
+      console.error('이력 사진 소급채우기 실패:', targets[i].id, e);
+      fail++;
+    }
+  }
+  renderHistoryList();
+  msg.textContent = `완료 — 채움 ${filled}건, 구조함 자체에 사진 없음 ${noPhoto}건${fail>0?`, 실패 ${fail}건`:''}`;
+}
+
 async function deleteSelectedHistoryEntries(){
   const ids = [...selectedHistoryIdsSnapshot()];
   if(!ids.length) return;
@@ -2579,12 +2714,18 @@ function deleteRequestEntry(id){
     });
 }
 // 관리자가 화면에서 직접 신규/수정/삭제할 때도 이력에 자동 기록(승인 절차 없이 바로 approved 상태로)
-function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, reason){
+function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, reason, photoDataUrl, photoDataUrls){
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — photoDataUrl이 항상 null로 고정돼있어서,
+  // 관리자가 신규입력하면서 사진을 첨부해도 변경이력엔 절대 안 보이고 있었음. 선택적
+  // 매개변수로 받아서, 있으면 그대로 저장함(기존 호출부들은 안 넘기면 여전히 null).
+  // photoDataUrls(배열)는 대량작업용 — 한 이력 항목 안에 여러 건이 묶여있고, 각자 다른
+  // 사진을 가질 수 있으므로 단일 photoDataUrl과 별도로 배열 그대로 저장함.
   upsertRequestEntry({
     id: newId(), type, targetId,
     addr: addr||'', oldLat: oldLat??null, oldLng: oldLng??null, newLat: newLat??null, newLng: newLng??null,
     reason: reason || '관리자 직접 작업', source:'admin', org: currentAdminOrg,
-    photoDataUrl: null, photoGPS: null, distance: null,
+    photoDataUrl: photoDataUrl || null, photoDataUrls: (photoDataUrls && photoDataUrls.length) ? photoDataUrls : null,
+    photoGPS: null, distance: null,
     submittedAt: Date.now(), resolvedAt: Date.now(), status: 'approved'
   });
 }
@@ -2911,7 +3052,7 @@ async function applyApprovedChange(entry, isCivilianAuto){
   if(entry.type==='add'){
     const rec = {id: entry.targetId || newId(), lat:entry.newLat, lng:entry.newLng, addr:entry.addr||'', note:'', lastEditSource:sourceTag};
     if(isCivilianAuto){
-      _cache = loadRecords().concat([rec]);
+      _cache = keepSysNotice(loadRecords().concat([rec]));
     } else {
       await upsertRecord(rec); // ⚠️ 실패하면 여기서 throw돼서 approveRequest의 catch가 잡을 수 있게 함
     }
@@ -2925,7 +3066,7 @@ async function applyApprovedChange(entry, isCivilianAuto){
     const target = markerObjs[entry.targetId];
     if(isCivilianAuto){
       if(target){ clusterer.removeMarker(target.marker); delete markerObjs[entry.targetId]; }
-      _cache = loadRecords().filter(r=>r.id!==entry.targetId);
+      _cache = keepSysNotice(loadRecords().filter(r=>r.id!==entry.targetId));
     } else {
       // ⚠️ 예전엔 서버 삭제를 확인하기도 전에 지도 마커부터 먼저 지웠음 — 삭제가 실패하면
       // "서버엔 남아있는데 화면에서만 사라진" 상태가 될 수 있었음. 이제 서버 삭제가 실제로
@@ -2941,7 +3082,7 @@ async function applyApprovedChange(entry, isCivilianAuto){
         const list = loadRecords();
         const i = list.findIndex(r=>r.id===rec.id);
         if(i>-1) list[i] = rec;
-        _cache = list;
+        _cache = keepSysNotice(list);
       } else {
         await upsertRecord(rec);
       }
@@ -3108,20 +3249,31 @@ window.onNativeCurrentLocation = function(lat, lng){
 // (별도 브라우저 권한 팝업 없이 더 빠르고 안정적), 없으면(일반 웹브라우저) 표준 웹
 // geolocation API로 대체함.
 function getBestAvailableLocation(){
-  if(window.AndroidBlobDownloader && typeof window.AndroidBlobDownloader.requestCurrentLocationNative === 'function'){
-    return new Promise((resolve)=>{
-      _pendingNativeLocationResolve = resolve;
-      setTimeout(()=>resolve(null), 5000); // 네이티브가 응답 안 하면 5초 후 포기(무한 대기 방지)
-      window.AndroidBlobDownloader.requestCurrentLocationNative();
-    });
-  }
-  return new Promise((resolve)=>{
+  const viaWeb = ()=> new Promise((resolve)=>{
     if(!navigator.geolocation){ resolve(null); return; }
     navigator.geolocation.getCurrentPosition(
       (pos)=>resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       ()=>resolve(null),
       { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
     );
+  });
+  const hasNative = window.AndroidBlobDownloader && typeof window.AndroidBlobDownloader.requestCurrentLocationNative === 'function';
+  if(!hasNative) return viaWeb();
+  // ⚠️ 재점검 중 발견 — 네이티브는 "마지막으로 알려진 위치"(getLastKnownLocation)를 주는데, 기기를 막 켰거나
+  // 위치를 오래 안 쓴 경우 null이거나 오래된 값일 수 있음. 예전엔 네이티브가 null이면 웹 geolocation으로
+  // 대체하지 않고 그냥 실패해서, 웹으론 잡히는 위치를 못 가져왔음. 이제 네이티브가 null이거나 5초 안에
+  // 응답이 없으면 웹 geolocation(최신 위치)으로 대체함.
+  return new Promise((resolve)=>{
+    let settled = false;
+    const finish = (loc)=>{
+      if(settled) return;
+      settled = true;
+      _pendingNativeLocationResolve = null;
+      if(loc) resolve(loc); else viaWeb().then(resolve);
+    };
+    _pendingNativeLocationResolve = finish;
+    setTimeout(()=>finish(null), 5000);
+    try{ window.AndroidBlobDownloader.requestCurrentLocationNative(); }catch(e){ finish(null); }
   });
 }
 
@@ -3923,7 +4075,7 @@ async function saveEditCoord(){
     // 여기서는 화면 마커·이력을 건드리지 않고 그대로 종료함(입력값은 남겨서 재시도 가능하게 함).
     return;
   }
-  logAdminChange('edit', rec.id, addr||before.addr, before.lat, before.lng, lat, lng, '관리자 좌표 직접수정');
+  logAdminChange('edit', rec.id, addr||before.addr, before.lat, before.lng, lat, lng, '관리자 좌표 직접수정', _adminPhotoDataUrl['editLat']);
   markerObjs[currentMarkerId].record = rec;
   markerObjs[currentMarkerId].marker.setPosition(new kakao.maps.LatLng(lat,lng));
   markerObjs[currentMarkerId].marker.setImage(pickLifesaverIcon(rec)); // 옅은 주황(관리자 수정)으로 즉시 갱신
@@ -4136,6 +4288,22 @@ function switchTab(name){
   if(name==='history') renderHistoryList();
   if(name==='new') initNewMapPicker();
   if(name==='backup') renderBackupList();
+  if(name==='notice') document.getElementById('noticeInput').value = getSysNoticeRecord()?.note || '';
+}
+
+// 관리자가 공지 탭에서 저장/지우기 버튼을 눌렀을 때 호출됨
+async function saveNoticeFromAdmin(){
+  const msg = document.getElementById('noticeMsg');
+  const text = document.getElementById('noticeInput').value;
+  msg.textContent = '저장 중…'; msg.className = 'msg ok'; msg.style.display = 'block';
+  try{
+    await saveSysNotice(text);
+    refreshNoticeTicker();
+    msg.textContent = text.trim() ? '저장되었습니다. 전광판에 반영되었습니다.' : '공지를 지웠습니다.';
+  }catch(e){
+    msg.textContent = '저장 실패: ' + e.message;
+    msg.className = 'msg err';
+  }
 }
 
 /* ---------------- 백업 / 복구 ---------------- */
@@ -4328,6 +4496,7 @@ function renderReqCard(r, actionable){
     <div class="req-card">
       ${checkbox}
       ${r.photoDataUrl ? `<img src="${r.photoDataUrl}">` : ''}
+      ${r.photoDataUrls && r.photoDataUrls.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin:6px 0;">${r.photoDataUrls.map(u=>`<img src="${u}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;">`).join('')}</div>` : ''}
       <div class="req-meta">
         <b>${TYPE_LABEL[r.type]||r.type}</b> · ${sourceBadge} · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
         <b>대상</b>: ${(r.addr || '(주소 미입력)').replace(/</g,'&lt;')} ${r.region ? `· ${(r.region+'').replace(/</g,'&lt;')}` : ''}<br>
@@ -4600,7 +4769,7 @@ async function addSingle(){
     msg.textContent='저장에 실패했습니다. 위 알림을 확인하고 다시 시도해주세요.'; msg.className='msg err'; msg.style.display='block';
     return;
   }
-  logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력');
+  logAdminChange('add', rec.id, addr, null, null, lat, lng, '관리자 신규입력', _adminPhotoDataUrl['newLat']);
   classifyMissingRegions();
   uploadAdminPhotoIfAny(rec.id, 'newLat'); // 사진을 찍었으면 방금 만들어진 id로 업로드(실패해도 등록 자체엔 영향 없음)
   document.getElementById('newPhotoPreview').innerHTML = '';
@@ -4626,6 +4795,8 @@ async function addSingle(){
 // 처리하면 서로 뒤섞일 수 있음 — 반드시 한 장씩 순서대로(await) 처리함.
 async function handleMultiPhotoBulkAdd(inputEl){
   const files = Array.from(inputEl.files || []);
+  // 진단 문구 — 앱(네이티브)이 여러 장 선택 결과를 웹으로 못 넘기는 경우(clipData 미처리 버전)를
+  // 콘솔 없이도 화면에서 바로 알 수 있게 함. 0장이면 안내하고 종료, 1장 이상이면 몇 장 받았는지 표시.
   if(!files.length){
     const m0 = document.getElementById('bulkDirectMsg');
     if(m0){ m0.textContent = '선택한 사진이 앱으로 전달되지 않았습니다(0장 수신). 다시 선택해 보세요.'; m0.className='msg err'; m0.style.display='block'; }
@@ -4677,6 +4848,20 @@ async function handleMultiPhotoBulkAdd(inputEl){
       reader.onload = async (e)=>{
         const jsGps = await parseExifGPS(e.target.result);
         if(jsGps){ resolve(jsGps); return; }
+        // ⚠️ 새 앱(getGpsForSelectionIndex 지원): "선택한 순서 기준 i번째 사진의 GPS"를 직접 물어봄.
+        // 예전엔 네이티브가 사진 수만큼 GPS를 밀어주고 웹이 "이번 차례"에만 받았는데, 타이밍이 어긋나면
+        // A 사진의 GPS가 B 사진에 붙을 수 있었음(잘못된 좌표가 조용히 등록되는 위험). 물어보는 방식은
+        // 순서가 정확히 맞아서 그런 일이 없고, 네이티브가 "없다"고 답하면 1.5초를 더 기다리지도 않음.
+        if(window.AndroidBlobDownloader && typeof window.AndroidBlobDownloader.getGpsForSelectionIndex === 'function'){
+          try{
+            const s = String(window.AndroidBlobDownloader.getGpsForSelectionIndex(i) || '');
+            const [la, ln] = s.split(',').map(parseFloat);
+            if(s && !isNaN(la) && !isNaN(ln)){ resolve({ lat: la, lng: ln }); return; }
+          }catch(err){ console.warn('네이티브 GPS 조회 실패', err); }
+          resolve(null);
+          return;
+        }
+        // 예전 앱/일반 브라우저: 기존 방식(콜백 대기, 최대 1.5초)
         _pendingNativeGpsResolve = null;
         const nativeGpsPromise = new Promise((res)=>{
           _pendingNativeGpsResolve = res;
@@ -4890,7 +5075,9 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     // "취소" 버튼을 눌러도 revertChange가 지울 대상을 못 찾아 아무 일도 안 일어났음.
     // 실제로 성공한 항목들의 id 배열을 넣어서, 취소 시 전부 지울 수 있게 함.
     const succeededIds = toSave.filter((_, idx) => results[idx].status === 'fulfilled').map(r => r.id);
-    if(toSave.length>0) logAdminChange('add', succeededIds, `${toSave.length}건`, null, null, null, null, `관리자 대량입력(${logLabel}) — ${toSave.length}건 등록`);
+    // 성공한 항목들 중 사진이 있던 것만 모음(일부만 사진 첨부했을 수 있으므로)
+    const batchPhotos = succeededIds.map(id => rowPhotoMap[id]).filter(Boolean);
+    if(toSave.length>0) logAdminChange('add', succeededIds, `${toSave.length}건`, null, null, null, null, `관리자 대량입력(${logLabel}) — ${toSave.length}건 등록`, null, batchPhotos);
     if(failCount===0){
       msg.textContent = `${toSave.length}건 등록 완료! 지도에 즉시 반영되었습니다.${formatErrors? ` (${formatErrors}건은 좌표 오류로 제외)`:''}`; msg.className='msg ok';
     } else {
@@ -5507,7 +5694,8 @@ async function saveBulkEdit(){
     // 담아서 넘김 — revertChange가 각 항목을 개별적으로 예전 값으로 되돌릴 수 있게 함.
     const succeededIds = new Set(toSave.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id));
     const succeededSnapshots = beforeSnapshots.filter(s => succeededIds.has(s.id));
-    logAdminChange('edit', succeededSnapshots, `${updated}건`, null, null, null, null, `관리자 대량수정(표에서 직접 저장) — ${updated}건 변경`);
+    const batchPhotos = [...succeededIds].map(id => rowPhotoMap[id]).filter(Boolean);
+    logAdminChange('edit', succeededSnapshots, `${updated}건`, null, null, null, null, `관리자 대량수정(표에서 직접 저장) — ${updated}건 변경`, null, batchPhotos);
   }
   if(btn){ btn.disabled = false; btn.textContent = '보이는 항목 저장'; }
   const errTotal = formatErrors + saveErrors;
