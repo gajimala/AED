@@ -856,7 +856,7 @@
           <option value="all">소속 해양경찰서: 전체</option>
         </select>
         <div style="font-size:12px;color:var(--ink-soft);margin:8px 0;">전체 <b id="historyCount">0</b>건</div>
-        <button class="btn btn-ghost btn-sm" onclick="backfillMissingHistoryPhotos()">🔄 사진 없는 과거 이력에 사진 소급 채우기</button>
+        <button class="btn btn-ghost btn-sm" onclick="backfillMissingHistoryPhotos()">🔄 이력 복구 · 사진 소급 채우기</button>
         <div class="msg" id="backfillMsg"></div>
         <div class="row" id="historySelectionBar" style="gap:8px;margin-bottom:8px;display:none;">
           <span class="count-pill" id="historySelectedCount">0개 선택됨</span>
@@ -1064,7 +1064,16 @@ async function deleteRecord(id){
     throw e; // await하는 쪽이 실패를 알 수 있게 전달
   }
 }
-function newId(){ return 'g' + Date.now() + Math.floor(Math.random()*1000); }
+// ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 예전엔 현재시각(밀리초)에 0~999 난수만 붙여서, 붙여넣기·엑셀
+// 대량입력처럼 같은 밀리초에 여러 개를 만들면 id 가 자주 겹쳤음(60줄이면 약 84%). id 가 겹치면 ① 먼저 만든
+// 줄이 나중 줄에 덮어써져 사라지고(성공 메시지는 정상), ② 하나만 삭제해도 같은 id 의 다른 줄이 같이 삭제되고,
+// ③ 같은 id 를 쓰는 사진도 서로 덮어씀. 한 화면 안에서는 1씩 늘어나는 번호를 붙여 절대 겹치지 않게 하고,
+// 다른 기기와의 우연한 충돌은 난수로 피함. (형식은 예전처럼 'g' + 숫자라서 기존 데이터·코드와 그대로 호환됨)
+let _idSeq = 0;
+function newId(){
+  _idSeq = (_idSeq + 1) % 1000;
+  return 'g' + Date.now() + String(_idSeq).padStart(3, '0') + String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+}
 
 /* =========================================================
    저장 완료 표시 — Worker가 저장 성공했다고 응답하면 바로 "완료"를 보여주고
@@ -2620,41 +2629,85 @@ function updateHistorySelectionBar(){
 
 // 체크된 이력들을 한 번에 삭제 — 관리자 코드는 한 번만 묻고, 하나씩 순서대로 삭제함
 // (lifesavers.json 동시수정 충돌 때와 같은 이유로, 여러 건을 한꺼번에 병렬로 보내지 않음)
-// 과거 이력 중 사진이 없는 것들(관리자 신규입력/좌표수정, 단일 건)을 찾아서, 그 구조함
-// 자체에 올라가있는 사진(uploadAdminPhotoIfAny로 당시 실제로 업로드는 됐던 것)을 가져와
-// 이력에도 소급으로 채워넣음. worker.js의 handleResolveReport가 photoDataUrl만 보내면
-// status/resolvedAt을 안 건드리도록 이미 고쳐져있어서, 이 호출로 다른 값은 안 바뀜.
+// 과거 이력 복구 + 사진 소급 채우기.
+// ⚠️ 이 함수는 워커 버전과 무관하게 동작해야 함. 예전 버전은 PUT /reports/{id}로 사진만 보냈는데, 워커의
+// handleResolveReport 수정본이 배포돼있지 않으면 옛 워커가 status를 undefined로 덮어쓰고(화면에 "undefined"로
+// 보임), 처리시각을 지금으로 바꾸고, 사진은 저장도 안 했음. 그래서 앱이 원래 이력을 저장하던 방식과 똑같이
+// POST /reports로 "항목 전체"를 같은 id로 다시 저장함(서버가 같은 id를 통째로 덮어씀) — status·처리시각이
+// 그대로 보존되고, 이미 망가진 항목(status 없음)도 이 호출로 복구됨.
+function inferHistoryStatus(e, recById, deletedTargets){
+  // 망가지기 전 상태는 서버에도 안 남아있어서, 현재 데이터를 기준으로 추정함:
+  //  · 신규: 구조함이 지금도 있으면 승인. 없는데 삭제 이력도 없으면 "취소됨"으로 추정.
+  //  · 수정: 구조함이 변경 좌표에 있으면 승인, 예전 좌표로 돌아가있으면 "취소됨"으로 추정.
+  if(e.type === 'add'){
+    if(recById.has(e.targetId)) return 'approved';
+    return deletedTargets.has(e.targetId) ? 'approved' : 'reverted';
+  }
+  if(e.type === 'edit'){
+    const rec = recById.get(e.targetId);
+    if(!rec) return 'approved';
+    const near = (a, b)=> a != null && b != null && Math.abs(a - b) < 1e-6;
+    if(near(rec.lat, e.newLat) && near(rec.lng, e.newLng)) return 'approved';
+    if(near(rec.lat, e.oldLat) && near(rec.lng, e.oldLng)) return 'reverted';
+  }
+  return 'approved';
+}
+
 async function backfillMissingHistoryPhotos(){
   const msg = document.getElementById('backfillMsg');
-  const targets = loadRequests().filter(r =>
-    r.source === 'admin' && !r.photoDataUrl &&
-    (r.type === 'add' || r.type === 'edit') &&
-    typeof r.targetId === 'string' // 대량작업(배열/null)은 특정 사진 하나로 대응이 안 되므로 제외
+  const all = loadRequests();
+  const recById = new Map(loadRecords().map(r => [r.id, r]));
+  const deletedTargets = new Set(all.filter(r => r.type === 'delete' && typeof r.targetId === 'string').map(r => r.targetId));
+  // 대상: 관리자 직접 작업의 단일 건(신규/수정). 대량작업(배열)·민간 제보는 건드리지 않음.
+  const candidates = all.filter(r =>
+    r.source === 'admin' && (r.type === 'add' || r.type === 'edit') &&
+    typeof r.targetId === 'string' && !(r.photoDataUrl && r.photoDataUrl.includes('\n')) &&
+    (!r.status || !r.photoDataUrl)
   );
-  if(!targets.length){ msg.textContent = '사진이 없는 이력이 없습니다.'; msg.className = 'msg ok'; msg.style.display = 'block'; return; }
+  if(!candidates.length){ msg.textContent = '복구하거나 채울 이력이 없습니다.'; msg.className = 'msg ok'; msg.style.display = 'block'; return; }
+  const damaged = candidates.filter(r => !r.status).length;
+  if(!confirm(`확인할 이력 ${candidates.length}건${damaged ? ` (그중 상태가 사라진 ${damaged}건은 복구)` : ''}을(를) 처리할까요?`)) return;
 
-  let filled = 0, noPhoto = 0, fail = 0;
-  for(let i=0; i<targets.length; i++){
-    msg.textContent = `확인 중… (${i+1}/${targets.length})`; msg.className = 'msg ok'; msg.style.display = 'block';
+  let statusFixed = 0, approvedN = 0, revertedN = 0, photoFilled = 0, noPhoto = 0, fail = 0;
+  for(let i = 0; i < candidates.length; i++){
+    const e = candidates[i];
+    const hadNoStatus = !e.status;
+    msg.textContent = `처리 중… (${i+1}/${candidates.length})`; msg.className = 'msg ok'; msg.style.display = 'block';
     try{
-      const res = await fetch(`${WORKER_URL}/lifesaver-photo/${targets[i].targetId}`);
-      if(!res.ok){ noPhoto++; continue; } // 그 구조함 자체에도 사진이 없음(애초에 안 찍었거나 이미 지워짐)
-      const data = await res.json();
-      if(!data.photoDataUrl){ noPhoto++; continue; }
-      const putRes = await fetch(`${WORKER_URL}/reports/${targets[i].id}`, {
-        method:'PUT', headers:{ 'Content-Type':'application/json', 'X-Admin-Code': ADMIN_CODE },
-        body: JSON.stringify({ photoDataUrl: data.photoDataUrl })
+      const fixed = { ...e };
+      if(hadNoStatus){
+        fixed.status = inferHistoryStatus(e, recById, deletedTargets);
+        // 관리자 직접 작업은 접수·처리가 같은 순간이라, 처리시각을 접수시각으로 되돌림(취소됨은 원래 취소 시각을 알 수 없어 그대로 둠)
+        if(fixed.status === 'approved') fixed.resolvedAt = e.submittedAt;
+      }
+      let gotPhoto = null;
+      if(!e.photoDataUrl){
+        const pr = await fetch(`${WORKER_URL}/lifesaver-photo/${e.targetId}`);
+        if(pr.ok){ const d = await pr.json(); if(d && d.photoDataUrl) gotPhoto = d.photoDataUrl; }
+        if(gotPhoto) fixed.photoDataUrl = gotPhoto; else noPhoto++;
+      }
+      if(!hadNoStatus && !gotPhoto) continue; // 상태도 멀쩡하고 채울 사진도 없으면 건드리지 않음
+      const res = await fetch(`${WORKER_URL}/reports`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Code': ADMIN_CODE },
+        body: JSON.stringify(fixed)
       });
-      if(!putRes.ok) throw new Error('HTTP '+putRes.status);
-      targets[i].photoDataUrl = data.photoDataUrl; // 로컬 캐시도 바로 반영
-      filled++;
-    }catch(e){
-      console.error('이력 사진 소급채우기 실패:', targets[i].id, e);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const saved = await res.json();
+      // 서버가 실제로 저장한 값으로 검증(저장이 조용히 빠졌는데 "완료"로 세지 않게)
+      if(saved.status !== fixed.status || (gotPhoto && saved.photoDataUrl !== gotPhoto)) throw new Error('저장 결과가 요청과 다름');
+      Object.assign(e, fixed);
+      if(hadNoStatus){ statusFixed++; if(fixed.status === 'reverted') revertedN++; else approvedN++; }
+      if(gotPhoto) photoFilled++;
+    }catch(err){
+      console.error('이력 복구/사진 채우기 실패:', e.id, err);
       fail++;
     }
   }
   renderHistoryList();
-  msg.textContent = `완료 — 채움 ${filled}건, 구조함 자체에 사진 없음 ${noPhoto}건${fail>0?`, 실패 ${fail}건`:''}`;
+  msg.textContent = '완료'
+    + (statusFixed ? ` — 상태 복구 ${statusFixed}건(관리자승인 ${approvedN} / 취소완료 ${revertedN}, 현재 데이터 기준 추정)` : '')
+    + `, 사진 채움 ${photoFilled}건, 구조함 자체에 사진 없음 ${noPhoto}건`
+    + (fail ? `, 실패 ${fail}건` : '');
 }
 
 async function deleteSelectedHistoryEntries(){
@@ -2714,6 +2767,25 @@ function deleteRequestEntry(id){
     });
 }
 // 관리자가 화면에서 직접 신규/수정/삭제할 때도 이력에 자동 기록(승인 절차 없이 바로 approved 상태로)
+// 이력 목록은 한 번에 전부 내려받으므로, 대량작업 사진은 아주 작게(가로 120px) 줄여서 최대 10장만 담음
+async function makeHistoryThumbs(urls, max = 10){
+  const out = [];
+  for(const u of (urls || []).slice(0, max)){
+    out.push(await new Promise(res => {
+      const img = new Image();
+      img.onload = ()=>{
+        const k = Math.min(1, 120 / img.width);
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k));
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        res(cv.toDataURL('image/jpeg', 0.5));
+      };
+      img.onerror = ()=>res(null);
+      img.src = u;
+    }));
+  }
+  return out.filter(Boolean);
+}
 function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, reason, photoDataUrl, photoDataUrls){
   // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — photoDataUrl이 항상 null로 고정돼있어서,
   // 관리자가 신규입력하면서 사진을 첨부해도 변경이력엔 절대 안 보이고 있었음. 선택적
@@ -2724,7 +2796,10 @@ function logAdminChange(type, targetId, addr, oldLat, oldLng, newLat, newLng, re
     id: newId(), type, targetId,
     addr: addr||'', oldLat: oldLat??null, oldLng: oldLng??null, newLat: newLat??null, newLng: newLng??null,
     reason: reason || '관리자 직접 작업', source:'admin', org: currentAdminOrg,
-    photoDataUrl: photoDataUrl || null, photoDataUrls: (photoDataUrls && photoDataUrls.length) ? photoDataUrls : null,
+    // ⚠️ 워커는 이력을 저장할 때 정해진 필드만 저장하고 photoDataUrls(배열)는 버렸음 — 그래서 대량작업 사진은
+    // 새로고침하면 사라졌음. 워커가 저장해주는 photoDataUrl 칸에 작은 썸네일들을 줄바꿈('\n')으로 이어
+    // 붙여 저장하고, 카드에서 다시 나눠서 보여줌(워커 수정 불필요).
+    photoDataUrl: photoDataUrl || ((photoDataUrls && photoDataUrls.length) ? photoDataUrls.join('\n') : null),
     photoGPS: null, distance: null,
     submittedAt: Date.now(), resolvedAt: Date.now(), status: 'approved'
   });
@@ -4495,8 +4570,9 @@ function renderReqCard(r, actionable){
   return `
     <div class="req-card">
       ${checkbox}
-      ${r.photoDataUrl ? `<img src="${r.photoDataUrl}">` : ''}
-      ${r.photoDataUrls && r.photoDataUrls.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin:6px 0;">${r.photoDataUrls.map(u=>`<img src="${u}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;">`).join('')}</div>` : ''}
+      ${r.photoDataUrl ? (r.photoDataUrl.includes('\n')
+        ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin:6px 0;">${r.photoDataUrl.split('\n').filter(Boolean).map(u=>`<img src="${u}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;">`).join('')}</div>`
+        : `<img src="${r.photoDataUrl}">`) : ''}
       <div class="req-meta">
         <b>${TYPE_LABEL[r.type]||r.type}</b> · ${sourceBadge} · <span style="color:${STATUS_COLOR[r.status]};font-weight:700;">${STATUS_LABEL[r.status]||r.status}</span><br>
         <b>대상</b>: ${(r.addr || '(주소 미입력)').replace(/</g,'&lt;')} ${r.region ? `· ${(r.region+'').replace(/</g,'&lt;')}` : ''}<br>
@@ -5076,7 +5152,7 @@ function renderBulkNewPreviewTable(parsed, previewElId, msgElId, logLabel, extra
     // 실제로 성공한 항목들의 id 배열을 넣어서, 취소 시 전부 지울 수 있게 함.
     const succeededIds = toSave.filter((_, idx) => results[idx].status === 'fulfilled').map(r => r.id);
     // 성공한 항목들 중 사진이 있던 것만 모음(일부만 사진 첨부했을 수 있으므로)
-    const batchPhotos = succeededIds.map(id => rowPhotoMap[id]).filter(Boolean);
+    const batchPhotos = await makeHistoryThumbs(succeededIds.map(id => rowPhotoMap[id]).filter(Boolean));
     if(toSave.length>0) logAdminChange('add', succeededIds, `${toSave.length}건`, null, null, null, null, `관리자 대량입력(${logLabel}) — ${toSave.length}건 등록`, null, batchPhotos);
     if(failCount===0){
       msg.textContent = `${toSave.length}건 등록 완료! 지도에 즉시 반영되었습니다.${formatErrors? ` (${formatErrors}건은 좌표 오류로 제외)`:''}`; msg.className='msg ok';
@@ -5694,7 +5770,7 @@ async function saveBulkEdit(){
     // 담아서 넘김 — revertChange가 각 항목을 개별적으로 예전 값으로 되돌릴 수 있게 함.
     const succeededIds = new Set(toSave.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id));
     const succeededSnapshots = beforeSnapshots.filter(s => succeededIds.has(s.id));
-    const batchPhotos = [...succeededIds].map(id => rowPhotoMap[id]).filter(Boolean);
+    const batchPhotos = await makeHistoryThumbs([...succeededIds].map(id => rowPhotoMap[id]).filter(Boolean));
     logAdminChange('edit', succeededSnapshots, `${updated}건`, null, null, null, null, `관리자 대량수정(표에서 직접 저장) — ${updated}건 변경`, null, batchPhotos);
   }
   if(btn){ btn.disabled = false; btn.textContent = '보이는 항목 저장'; }
