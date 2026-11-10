@@ -4448,6 +4448,31 @@ async function recomputeAedSummaryNow(){
   }
 }
 
+// ⚠️ 복구 직후 지도에 반영 안 되던 문제(사용자가 발견함) — 예전엔 복구가 끝나도 화면 데이터를 비우기만 하고
+// 지도 마커는 그대로 둬서, 복구 시점 이후에 새로 입력·수정한 것들이 지도에 남아있었음(새로고침해야 사라짐).
+// 서버는 복구 결과 데이터를 돌려주지 않고, 사이트의 lifesavers.json 은 저장소가 바뀐 뒤 사이트에 반영되기까지
+// 시간이 걸리므로, 방금 복구에 쓴 백업 파일을 화면이 직접 읽어와서 지도·건수·공지를 바로 맞춤.
+function backupFileUrls(name){
+  const urls = [];
+  const enc = encodeURIComponent(name);
+  // GitHub Pages 로 서비스 중이면 같은 저장소의 원본(raw) 주소를 먼저 씀 — 방금 만든 백업도 바로 읽힘(브랜치는 main)
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+  const repo = location.pathname.split('/').filter(Boolean)[0];
+  if(m && repo) urls.push(`https://raw.githubusercontent.com/${m[1]}/${repo}/main/backups/${enc}`);
+  urls.push(`backups/${enc}`); // 사이트에 같이 올라와 있으면 그쪽에서
+  return urls;
+}
+async function fetchBackupRecords(name){
+  for(const base of backupFileUrls(name)){
+    try{
+      const res = await fetch(`${base}?v=${Date.now()}`, { cache: 'no-store' });
+      if(!res.ok) continue;
+      const data = await res.json();
+      if(Array.isArray(data)) return data;
+    }catch(e){ console.warn('백업 파일 읽기 실패', base, e); }
+  }
+  return null;
+}
 function restoreBackup(name, label){
   if(!confirm(`정말 "${label}" 시점으로 되돌릴까요?\n\n지금의 데이터는 복구 전 자동으로 한 번 더 백업되지만, 그 사이에 입력된 변경사항은 이 시점 이후의 것으로 대체됩니다.`)) return;
   const msg = document.getElementById('backupMsg');
@@ -4456,9 +4481,20 @@ function restoreBackup(name, label){
     .then(async res=>{
       if(!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       const r = await res.json();
-      msg.textContent = `✅ "${label}" 시점으로 복구 완료 (${r.count}건). 새로고침하면 반영된 걸 볼 수 있습니다.`;
+      const restored = await fetchBackupRecords(name);
+      if(restored){
+        _cache = restored; // 복구된 상태 그대로(공지 레코드도 그 시점 것으로 돌아감)
+        try{ closeMarkerSheet(); }catch(e){} // 열려 있던 구조함 정보창은 옛 마커를 가리키므로 닫음
+        currentMarkerId = null;
+        populateRegionSelect(); // 지역 선택창의 건수
+        renderAllMarkers();     // 지도 마커를 복구된 데이터로 다시 그림(새로 입력한 건 사라지고, 수정한 건 원래 위치로)
+        refreshNoticeTicker();  // 공지 띠
+        try{ buildBulkEditTable(); }catch(e){}
+        msg.textContent = `✅ "${label}" 시점으로 복구 완료 (${r.count}건). 지도에도 바로 반영했습니다.`;
+      }else{
+        msg.textContent = `✅ "${label}" 시점으로 복구 완료 (${r.count}건). 서버에는 반영됐지만 화면은 아직 이전 모습일 수 있어요. 잠시 뒤 새로고침하면 반영된 걸 볼 수 있습니다.`;
+      }
       msg.className='msg ok'; msg.style.display='block';
-      _cache = null; // 로컬 캐시를 비워서 다음 조회 때 새 데이터를 받아오게 함
       renderBackupList();
     })
     .catch(e=>{
