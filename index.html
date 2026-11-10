@@ -4003,11 +4003,16 @@ function cprScheduleNextBeat(){
 
 function cprSchedulerTick(){
   if(!cprRunning) return;
+  const now = cprAudioCtx.currentTime;
+  // ⚠️ 진짜 버그였던 부분(사용자가 발견함) — 정지(버튼·음성 "정지")는 cprRunning 값만 바꾸고 박자 타이머와
+  // 오디오 시계는 계속 흐르는데, "다음 박자 시각(cprNextBeatTime)"은 멈춘 시각에 그대로 남아있었음.
+  // 다시 시작하면 아래 while 이 "정지 중에 지나간 박자"를 한꺼번에 따라잡느라, 14에서 멈췄다 7초 뒤에
+  // 시작하면 숫자가 26부터 나오고(주기까지 올라감) 지난 박자 소리도 한꺼번에 울릴 수 있었음.
+  // 박자가 0.25초 넘게 밀려 있으면(정지 후 재시작·제세동 버튼·화면이 잠깐 멈췄다 돌아온 경우) 지난
+  // 박자는 버리고 "지금부터" 새로 이어서 셈 — 숫자는 멈춘 곳의 다음(15)부터 나옴.
+  if(cprNextBeatTime < now - 0.25){ cprNextBeatTime = now + 0.05; }
   // 다음 박자 예약 시각이 "이제 곧(lookahead 이내)" 다가왔으면 미리 예약해둠.
-  // 한 번의 확인 주기(25ms) 안에 여러 박자가 밀려서 몰릴 일은 없지만(가장 빠른 박자도 600ms
-  // 간격), while로 처리해 혹시 브라우저가 잠깐 완전히 멈췄다 돌아온 경우에도 밀린 박자를
-  // 건너뛰지 않고 순서대로 다 예약하게 함.
-  while(cprNextBeatTime < cprAudioCtx.currentTime + CPR_LOOKAHEAD_SEC){
+  while(cprNextBeatTime < now + CPR_LOOKAHEAD_SEC){
     cprScheduleNextBeat();
   }
 }
